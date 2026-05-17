@@ -6,6 +6,7 @@ dist
 coverage
 *.log
 *.tsbuildinfo
+.DS_Store
 .demo-stock-accounts.json
 .demo-sold-accounts.json
 .demo-gmail-accounts.json

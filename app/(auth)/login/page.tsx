@@ -77,7 +77,7 @@ async function login(formData: FormData) {
 
     redirect("/");
   }
-  redirect("/login?error=Invalid%20email%20or%20password");
+  redirect(`/login?error=${encodeURIComponent(error.message)}`);
 }
 
 export default async function LoginPage({
