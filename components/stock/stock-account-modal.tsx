@@ -183,13 +183,22 @@ export function StockAccountModal({
               <input type="hidden" name="id" value={stock?.id ?? ""} />
               <div className="space-y-2">
                 <Label htmlFor="game_name">Game name</Label>
-                <Select id="game_name" name="game_name" required defaultValue={stock?.game_name ?? gameCategories[0] ?? ""}>
+                <Input
+                  id="game_name"
+                  name="game_name"
+                  list="game_name_suggestions"
+                  required
+                  placeholder="Mobile Legends"
+                  defaultValue={stock?.game_name ?? gameCategories[0] ?? "Mobile Legends"}
+                />
+                <datalist id="game_name_suggestions">
                   {gameCategories.map((game) => (
-                    <option key={game} value={game}>
-                      {game}
-                    </option>
+                    <option key={game} value={game} />
                   ))}
-                </Select>
+                </datalist>
+                <p className="text-xs text-muted-foreground">
+                  Type any game name, or choose a saved suggestion.
+                </p>
               </div>
 
               <div className="space-y-2">

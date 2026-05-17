@@ -148,7 +148,7 @@ create table public.settings (
   id uuid primary key default gen_random_uuid(),
   business_name text not null default 'Game Account Manager',
   currency text not null default 'BDT',
-  game_categories text[] not null default array['Mobile Legends', 'Clash of Clans', 'PUBG', 'Free Fire', 'Valorant', 'COD Mobile'],
+  game_categories text[] not null default array['Mobile Legends', 'Clash of Clans'],
   sale_source_websites text[] not null default array['Facebook', 'PlayerAuctions', 'G2G', 'Discord'],
   expense_categories text[] not null default array['gmail_purchase', 'ads', 'website_fee', 'employee_payment', 'scam_account', 'refund_account', 'other'],
   employee_permissions jsonb not null default '{"can_view_profit": false, "can_view_buying_price": false}'::jsonb,

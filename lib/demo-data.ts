@@ -256,7 +256,7 @@ export const demoSettings: Settings = {
   id: "settings-demo",
   business_name: "Kings Rock",
   currency: "BDT",
-  game_categories: ["Mobile Legends", "Clash of Clans", "PUBG", "Free Fire", "Valorant", "COD Mobile"],
+  game_categories: ["Mobile Legends", "Clash of Clans"],
   sale_source_websites: ["Facebook", "PlayerAuctions", "G2G", "Discord"],
   expense_categories: [
     "gmail_purchase",
