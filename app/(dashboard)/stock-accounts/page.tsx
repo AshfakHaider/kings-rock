@@ -1,0 +1,154 @@
+import { deleteStockAccount } from "@/app/actions";
+import type React from "react";
+import { DeleteButton } from "@/components/modules/delete-button";
+import { PageHeader } from "@/components/modules/page-header";
+import { ResponsiveTable } from "@/components/modules/responsive-table";
+import { StatusBadge } from "@/components/modules/status-badge";
+import { AssignmentSelect } from "@/components/stock/assignment-select";
+import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
+import { StockAccountModal } from "@/components/stock/stock-account-modal";
+import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { formatDate, money } from "@/lib/utils";
+import Link from "next/link";
+
+function DetailLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="block rounded-md p-1 -m-1 hover:bg-muted">
+      {children}
+    </Link>
+  );
+}
+
+function accountTitle(code: string | null | undefined, title: string) {
+  return code ? `${code} ${title}` : title;
+}
+
+function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null }>(account: T) {
+  return {
+    ...account,
+    image_url: null,
+    image_urls: []
+  };
+}
+
+export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+  const params = (await searchParams) ?? {};
+  const [settings, stockAccounts, profiles, currentProfile] = await Promise.all([
+    getSettings(),
+    getStockAccounts(),
+    getProfiles(),
+    getCurrentProfile()
+  ]);
+  const visibleStockAccounts = stockAccounts.filter((account) => account.status !== "sold");
+  const employees = profiles.filter((profile) => profile.role !== "admin" && profile.status === "active");
+  const canViewBuyingPrice = currentProfile.role !== "employee";
+  const canManageStockRecords = currentProfile.role !== "employee";
+  const totalAvailable = stockAccounts.filter((account) => account.status === "available").length;
+  const stockValue = stockAccounts
+    .filter((account) => account.status !== "sold")
+    .reduce((total, account) => total + Number(account.buying_price), 0);
+  type StockRow = (typeof visibleStockAccounts)[number];
+
+  return (
+    <>
+      <PageHeader
+        title="Stock Accounts"
+        description={
+          canViewBuyingPrice
+            ? `${totalAvailable} available accounts worth ${money(stockValue, settings.currency)}.`
+            : `${totalAvailable} available accounts.`
+        }
+        action={
+          <StockAccountModal
+            employees={profiles.filter((profile) => profile.role !== "admin")}
+            gameCategories={settings.game_categories}
+            canViewBuyingPrice={canViewBuyingPrice}
+          />
+        }
+      />
+      <ResponsiveTable
+        rows={visibleStockAccounts}
+        searchQuery={params.q}
+        searchPlaceholder="Search by game, title, secret code, employee..."
+        columns={[
+          {
+            key: "title",
+            header: "Account",
+            cell: (row) => (
+              <div className="flex w-full min-w-0 items-start justify-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <DetailLink href={`/stock-accounts/${row.id}`}>
+                  <p className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap font-medium text-primary">
+                    {row.secret_code ? <span className="shrink-0 font-semibold">{row.secret_code}</span> : null}
+                    <span className="min-w-0 truncate">{row.account_title}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">{row.game_name}</p>
+                  </DetailLink>
+                </div>
+                <CopyStockTitleButton title={accountTitle(row.secret_code, row.account_title)} />
+              </div>
+            ),
+            searchValue: (row) => `${row.account_title} ${row.game_name} ${row.secret_code ?? ""} ${row.assigned_employee?.name ?? ""}`
+          },
+          ...(canViewBuyingPrice
+            ? [{
+                key: "price",
+                header: "Buying price",
+                cell: (row: StockRow) => <DetailLink href={`/stock-accounts/${row.id}`}>{money(row.buying_price, settings.currency)}</DetailLink>
+              } as const]
+            : []),
+          {
+            key: "selling",
+            header: "Selling price",
+            cell: (row) => <DetailLink href={`/stock-accounts/${row.id}`}>{money(row.selling_price, settings.currency)}</DetailLink>
+          },
+          {
+            key: "date",
+            header: "Purchase date",
+            cell: (row) => <DetailLink href={`/stock-accounts/${row.id}`}>{formatDate(row.purchase_date)}</DetailLink>
+          },
+          {
+            key: "employee",
+            header: "Assigned",
+            cell: (row) => (
+              <AssignmentSelect
+                account={withoutImages(row)}
+                employees={employees}
+              />
+            ),
+            searchValue: (row) => row.assigned_employee?.name ?? "Available"
+          },
+          {
+            key: "status",
+            header: "Status",
+            cell: (row) => <DetailLink href={`/stock-accounts/${row.id}`}><StatusBadge value={row.status} /></DetailLink>,
+            searchValue: (row) => row.status
+          },
+          ...(canManageStockRecords
+            ? [{
+                key: "actions",
+                header: "Actions",
+                cell: (row: StockRow) => (
+                  <div className="flex flex-wrap gap-2">
+                    <StockAccountModal
+                      variant="edit"
+                      trigger="icon"
+                      stock={withoutImages(row)}
+                      existingImageCount={row.image_urls?.length ?? (row.image_url ? 1 : 0)}
+                      employees={employees}
+                      gameCategories={settings.game_categories}
+                      canViewBuyingPrice={canViewBuyingPrice}
+                    />
+                    <form action={deleteStockAccount}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <DeleteButton label="Delete account" iconOnly />
+                    </form>
+                  </div>
+                )
+              } as const]
+            : [])
+        ]}
+      />
+    </>
+  );
+}

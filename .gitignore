@@ -1,0 +1,16 @@
+.next
+node_modules
+.env
+.env*.local
+dist
+coverage
+*.log
+*.tsbuildinfo
+.demo-stock-accounts.json
+.demo-sold-accounts.json
+.demo-gmail-accounts.json
+.demo-profiles.json
+.demo-expenses.json
+.demo-daily-tasks.json
+.demo-daily-task-completions.json
+public/demo-uploads
