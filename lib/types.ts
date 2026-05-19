@@ -174,3 +174,26 @@ export type Settings = {
   expense_categories: string[];
   employee_permissions: Record<string, unknown>;
 };
+
+export type DashboardSnapshot = {
+  currency: string;
+  role: Role;
+  metrics: {
+    totalStockAccounts: number;
+    totalStockBuyingValue: number;
+    totalSoldAccounts: number;
+    totalSalesAmount: number;
+    totalBuyingCost: number;
+    totalGrossProfit: number;
+    totalExpenses: number;
+    netProfit: number;
+    monthlyProfit: number;
+    yearlyProfit: number;
+    availableGmailCount: number;
+    usedGmailCount: number;
+    employeeAdvanceBalance: number;
+  };
+  monthlySeries: Array<{ month: string; sales: number; profit: number }>;
+  employeeProfitSeries: Array<{ name: string; profit: number; sales: number }>;
+  stockValueByGame: Array<{ game: string; value: number }>;
+};

@@ -53,16 +53,13 @@ async function login(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (!error) {
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
     const { data: profile } = await supabase
       .from("profiles")
       .select("status")
-      .eq("auth_user_id", user?.id)
+      .eq("auth_user_id", signInData.user.id)
       .maybeSingle();
 
     if (!profile) {

@@ -11,51 +11,13 @@ import {
 import { BarMetricChart } from "@/components/modules/charts";
 import { PageHeader } from "@/components/modules/page-header";
 import { StatCard } from "@/components/modules/stat-card";
-import {
-  getAdvanceTransactions,
-  getCurrentProfile,
-  getExpenses,
-  getGmailAccounts,
-  getSettings,
-  getSoldAccounts,
-  getStockAccounts
-} from "@/lib/data";
-import {
-  employeeProfitSeries,
-  getDashboardMetrics,
-  monthlySeries,
-  stockValueByGame
-} from "@/lib/metrics";
+import { getDashboardSnapshot } from "@/lib/data";
 import { money } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  const [settings, stockAccounts, soldAccounts, gmailAccounts, expenses, advanceTransactions, currentProfile] =
-    await Promise.all([
-      getSettings(),
-      getStockAccounts(),
-      getSoldAccounts(),
-      getGmailAccounts(),
-      getExpenses(),
-      getAdvanceTransactions(),
-      getCurrentProfile()
-    ]);
-  const canViewFinancials = currentProfile.role !== "employee";
-  const visibleSoldAccounts =
-    currentProfile.role === "employee"
-      ? soldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
-      : soldAccounts;
-  const visibleExpenses =
-    currentProfile.role === "employee"
-      ? expenses.filter((expense) => expense.paid_by === currentProfile.id)
-      : expenses;
-
-  const metrics = getDashboardMetrics({
-    stockAccounts,
-    soldAccounts: visibleSoldAccounts,
-    gmailAccounts,
-    expenses: visibleExpenses,
-    advanceTransactions
-  });
+  const snapshot = await getDashboardSnapshot();
+  const canViewFinancials = snapshot.role !== "employee";
+  const metrics = snapshot.metrics;
 
   return (
     <>
@@ -73,14 +35,14 @@ export default async function DashboardPage() {
         {canViewFinancials ? (
           <StatCard
             title="Stock buying value"
-            value={money(metrics.totalStockBuyingValue, settings.currency)}
+            value={money(metrics.totalStockBuyingValue, snapshot.currency)}
             icon={Wallet}
           />
         ) : null}
         <StatCard title="Sold accounts" value={String(metrics.totalSoldAccounts)} icon={ShoppingCart} />
         <StatCard
           title="Sales amount"
-          value={money(metrics.totalSalesAmount, settings.currency)}
+          value={money(metrics.totalSalesAmount, snapshot.currency)}
           icon={Banknote}
           tone="good"
         />
@@ -88,12 +50,12 @@ export default async function DashboardPage() {
           <>
             <StatCard
               title="Buying cost"
-              value={money(metrics.totalBuyingCost, settings.currency)}
+              value={money(metrics.totalBuyingCost, snapshot.currency)}
               icon={Boxes}
             />
             <StatCard
               title="Gross profit"
-              value={money(metrics.totalGrossProfit, settings.currency)}
+              value={money(metrics.totalGrossProfit, snapshot.currency)}
               icon={TrendingUp}
               tone="good"
             />
@@ -101,7 +63,7 @@ export default async function DashboardPage() {
         ) : null}
         <StatCard
           title="Expenses"
-          value={money(metrics.totalExpenses, settings.currency)}
+          value={money(metrics.totalExpenses, snapshot.currency)}
           icon={ReceiptText}
           tone="warn"
         />
@@ -109,18 +71,18 @@ export default async function DashboardPage() {
           <>
             <StatCard
               title="Net profit/loss"
-              value={money(metrics.netProfit, settings.currency)}
+              value={money(metrics.netProfit, snapshot.currency)}
               icon={ChartNoAxesCombined}
               tone={metrics.netProfit >= 0 ? "good" : "warn"}
             />
             <StatCard
               title="Monthly profit"
-              value={money(metrics.monthlyProfit, settings.currency)}
+              value={money(metrics.monthlyProfit, snapshot.currency)}
               icon={TrendingUp}
             />
             <StatCard
               title="Yearly profit"
-              value={money(metrics.yearlyProfit, settings.currency)}
+              value={money(metrics.yearlyProfit, snapshot.currency)}
               icon={TrendingUp}
             />
           </>
@@ -128,7 +90,7 @@ export default async function DashboardPage() {
         <StatCard title="Available Gmail" value={String(metrics.availableGmailCount)} icon={Mail} />
         <StatCard
           title="Employee advance balance"
-          value={money(metrics.employeeAdvanceBalance, settings.currency)}
+          value={money(metrics.employeeAdvanceBalance, snapshot.currency)}
           icon={Banknote}
         />
       </section>
@@ -136,7 +98,7 @@ export default async function DashboardPage() {
       <section className="grid gap-4 xl:grid-cols-2">
         <BarMetricChart
           title={canViewFinancials ? "Monthly sales and profit" : "Monthly sales"}
-          data={monthlySeries(visibleSoldAccounts)}
+          data={snapshot.monthlySeries}
           xKey="month"
           bars={[
             { key: "sales", name: "Sales", color: "#14b8a6" },
@@ -147,7 +109,7 @@ export default async function DashboardPage() {
           <>
             <BarMetricChart
               title="Employee profit comparison"
-              data={employeeProfitSeries(soldAccounts)}
+              data={snapshot.employeeProfitSeries}
               xKey="name"
               bars={[
                 { key: "profit", name: "Profit", color: "#22c55e" },
@@ -156,7 +118,7 @@ export default async function DashboardPage() {
             />
             <BarMetricChart
               title="Stock value by game"
-              data={stockValueByGame(stockAccounts)}
+              data={snapshot.stockValueByGame}
               xKey="game"
               bars={[{ key: "value", name: "Stock value", color: "#fb7185" }]}
             />

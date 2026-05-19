@@ -21,6 +21,7 @@ import type {
   AdvanceTransaction,
   DailyTask,
   DailyTaskCompletion,
+  DashboardSnapshot,
   EmployeeAdvance,
   Expense,
   GmailAccount,
@@ -30,6 +31,12 @@ import type {
   SoldAccount,
   StockAccount
 } from "@/lib/types";
+import {
+  employeeProfitSeries,
+  getDashboardMetrics,
+  monthlySeries,
+  stockValueByGame
+} from "@/lib/metrics";
 
 export async function getCurrentProfile(): Promise<Profile> {
   if (!hasSupabaseEnv()) {
@@ -76,6 +83,120 @@ export async function getSettings(): Promise<Settings> {
   const supabase = await createClient();
   const { data } = await supabase.from("settings").select("*").limit(1).single();
   return (data as Settings) ?? demoSettings;
+}
+
+function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnapshot {
+  return {
+    ...snapshot,
+    metrics: {
+      totalStockAccounts: Number(snapshot.metrics.totalStockAccounts ?? 0),
+      totalStockBuyingValue: Number(snapshot.metrics.totalStockBuyingValue ?? 0),
+      totalSoldAccounts: Number(snapshot.metrics.totalSoldAccounts ?? 0),
+      totalSalesAmount: Number(snapshot.metrics.totalSalesAmount ?? 0),
+      totalBuyingCost: Number(snapshot.metrics.totalBuyingCost ?? 0),
+      totalGrossProfit: Number(snapshot.metrics.totalGrossProfit ?? 0),
+      totalExpenses: Number(snapshot.metrics.totalExpenses ?? 0),
+      netProfit: Number(snapshot.metrics.netProfit ?? 0),
+      monthlyProfit: Number(snapshot.metrics.monthlyProfit ?? 0),
+      yearlyProfit: Number(snapshot.metrics.yearlyProfit ?? 0),
+      availableGmailCount: Number(snapshot.metrics.availableGmailCount ?? 0),
+      usedGmailCount: Number(snapshot.metrics.usedGmailCount ?? 0),
+      employeeAdvanceBalance: Number(snapshot.metrics.employeeAdvanceBalance ?? 0)
+    },
+    monthlySeries: (snapshot.monthlySeries ?? []).map((item) => ({
+      month: item.month,
+      sales: Number(item.sales),
+      profit: Number(item.profit)
+    })),
+    employeeProfitSeries: (snapshot.employeeProfitSeries ?? []).map((item) => ({
+      name: item.name,
+      profit: Number(item.profit),
+      sales: Number(item.sales)
+    })),
+    stockValueByGame: (snapshot.stockValueByGame ?? []).map((item) => ({
+      game: item.game,
+      value: Number(item.value)
+    }))
+  };
+}
+
+export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
+  if (!hasSupabaseEnv()) {
+    const [settings, stockAccounts, soldAccounts, gmailAccounts, expenses, advanceTransactions, currentProfile] =
+      await Promise.all([
+        getSettings(),
+        getStockAccounts(),
+        getSoldAccounts(),
+        getGmailAccounts(),
+        getExpenses(),
+        getAdvanceTransactions(),
+        getCurrentProfile()
+      ]);
+    const visibleSoldAccounts =
+      currentProfile.role === "employee"
+        ? soldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
+        : soldAccounts;
+    const visibleExpenses =
+      currentProfile.role === "employee"
+        ? expenses.filter((expense) => expense.paid_by === currentProfile.id)
+        : expenses;
+
+    return {
+      currency: settings.currency,
+      role: currentProfile.role,
+      metrics: getDashboardMetrics({
+        stockAccounts,
+        soldAccounts: visibleSoldAccounts,
+        gmailAccounts,
+        expenses: visibleExpenses,
+        advanceTransactions
+      }),
+      monthlySeries: monthlySeries(visibleSoldAccounts),
+      employeeProfitSeries: employeeProfitSeries(soldAccounts),
+      stockValueByGame: stockValueByGame(stockAccounts)
+    };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("dashboard_snapshot");
+
+  if (!error && data) {
+    return normalizeDashboardSnapshot(data as DashboardSnapshot);
+  }
+
+  const [settings, stockAccounts, soldAccounts, gmailAccounts, expenses, advanceTransactions, currentProfile] =
+    await Promise.all([
+      getSettings(),
+      getStockAccounts(),
+      getSoldAccounts(),
+      getGmailAccounts(),
+      getExpenses(),
+      getAdvanceTransactions(),
+      getCurrentProfile()
+    ]);
+  const visibleSoldAccounts =
+    currentProfile.role === "employee"
+      ? soldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
+      : soldAccounts;
+  const visibleExpenses =
+    currentProfile.role === "employee"
+      ? expenses.filter((expense) => expense.paid_by === currentProfile.id)
+      : expenses;
+
+  return {
+    currency: settings.currency,
+    role: currentProfile.role,
+    metrics: getDashboardMetrics({
+      stockAccounts,
+      soldAccounts: visibleSoldAccounts,
+      gmailAccounts,
+      expenses: visibleExpenses,
+      advanceTransactions
+    }),
+    monthlySeries: monthlySeries(visibleSoldAccounts),
+    employeeProfitSeries: employeeProfitSeries(soldAccounts),
+    stockValueByGame: stockValueByGame(stockAccounts)
+  };
 }
 
 export async function getProfiles(): Promise<Profile[]> {
