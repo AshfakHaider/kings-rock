@@ -4,7 +4,7 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { DesktopNavLinks, MobileNavLinks } from "@/components/navigation/nav-links";
+import { DesktopNavLinks, MobileMenuPanel, MobileNavLinks } from "@/components/navigation/nav-links";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 async function signOut() {
@@ -58,12 +58,13 @@ export function AppShell({
       </aside>
 
       <main className="mobile-safe-bottom min-w-0 px-4 py-4 sm:px-6 lg:ml-72 lg:px-6 lg:py-8 xl:px-8">
-        <div className="mb-4 flex items-center justify-between gap-3 lg:hidden">
-          <div className="min-w-0">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 lg:hidden">
+          <div className="min-w-0 flex-1">
             <p className="text-xs text-muted-foreground">Business Manager</p>
             <p className="truncate font-semibold">{businessName}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <MobileMenuPanel role={profile.role} />
             <form action={signOut}>
               <Button type="submit" size="sm" variant="outline">
                 Sign out
