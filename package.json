@@ -2,10 +2,14 @@
   "name": "game-account-business-manager",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:render": "next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "live:create-admin": "node scripts/create-live-admin.cjs"

@@ -95,6 +95,40 @@ If Supabase env vars are missing, the app renders with demo data so you can insp
 
 Demo mode is for local development only. In production, missing Supabase keys show `/setup-required` unless you explicitly set `NEXT_PUBLIC_ALLOW_DEMO_MODE=true`.
 
+## Going Live On Render + Supabase
+
+Recommended Render setup:
+
+1. Push this project to GitHub.
+2. Create a Supabase project.
+3. Run [supabase/schema.sql](/Users/syednawazishhaider/Documents/Codex/2026-05-15/build-a-full-stack-mobile-friendly/supabase/schema.sql) in the Supabase SQL editor.
+4. Confirm these Supabase Storage buckets exist: `stock-images`, `task-screenshots`.
+5. Open Render and choose **New +** → **Web Service**.
+6. Connect GitHub and select `AshfakHaider/kings-rock`.
+7. Use these settings if Render does not read `render.yaml` automatically:
+
+```text
+Runtime: Node
+Build Command: npm ci && npm run build
+Start Command: npm run start:render
+Plan: Free
+```
+
+8. Add environment variables in Render → service → **Environment**:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+GMAIL_PASSWORD_ENCRYPTION_KEY=
+NEXT_PUBLIC_ALLOW_DEMO_MODE=false
+```
+
+9. Click **Deploy Web Service**.
+10. Create the first admin in Supabase Auth and link it to `profiles`, or run `npm run live:create-admin` locally with live Supabase env values.
+
+Render's free web services can sleep after inactivity, so the first visit after a break may take longer. For a business app you use all day, upgrade to a paid Render plan later to avoid sleeping.
+
 ## Going Live On Vercel + Supabase
 
 Recommended low-cost launch setup:
