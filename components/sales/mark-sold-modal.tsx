@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
 
 export function MarkSoldModal({
@@ -43,7 +44,7 @@ export function MarkSoldModal({
             <div className="flex items-center justify-between border-b px-4 py-3">
               <div>
                 <h2 className="text-lg font-semibold">Mark as sold</h2>
-                <p className="text-sm text-muted-foreground">{account.secret_code ? `${account.secret_code} ` : ""}{account.account_title}</p>
+                <p className="text-sm text-muted-foreground">{stockDisplayTitle(account.secret_code, account.account_title)}</p>
               </div>
               <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close">
                 <X className="h-4 w-4" />

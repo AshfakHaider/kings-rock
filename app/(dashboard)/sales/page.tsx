@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
 function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null }>(account: T) {
@@ -55,10 +56,7 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
             header: "Account",
             cell: (row) => (
               <Link href={`/stock-accounts/${row.id}`} className="block rounded-md p-1 -m-1 hover:bg-muted">
-                <p className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap font-medium text-primary">
-                  {row.secret_code ? <span className="shrink-0 font-semibold">{row.secret_code}</span> : null}
-                  <span className="min-w-0 truncate">{row.account_title}</span>
-                </p>
+                <p className="truncate font-medium text-primary">{stockDisplayTitle(row.secret_code, row.account_title)}</p>
                 <p className="text-xs text-muted-foreground">{row.game_name}</p>
               </Link>
             ),

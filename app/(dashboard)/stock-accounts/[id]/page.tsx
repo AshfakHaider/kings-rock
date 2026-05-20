@@ -9,10 +9,11 @@ import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
 function accountTitle(code: string | null | undefined, title: string) {
-  return code ? `${code} ${title}` : title;
+  return stockDisplayTitle(code, title);
 }
 
 export default async function StockAccountDetailPage({

@@ -8,6 +8,7 @@ import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 import Link from "next/link";
 
@@ -17,10 +18,6 @@ function DetailLink({ href, children }: { href: string; children: React.ReactNod
       {children}
     </Link>
   );
-}
-
-function accountTitle(code: string | null | undefined, title: string) {
-  return code ? `${code} ${title}` : title;
 }
 
 function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null }>(account: T) {
@@ -78,14 +75,13 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
               <div className="flex w-full min-w-0 items-start justify-end gap-2">
                 <div className="min-w-0 flex-1">
                   <DetailLink href={`/stock-accounts/${row.id}`}>
-                  <p className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap font-medium text-primary">
-                    {row.secret_code ? <span className="shrink-0 font-semibold">{row.secret_code}</span> : null}
-                    <span className="min-w-0 truncate">{row.account_title}</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">{row.game_name}</p>
+                    <p className="truncate font-medium text-primary">
+                      {stockDisplayTitle(row.secret_code, row.account_title)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{row.game_name}</p>
                   </DetailLink>
                 </div>
-                <CopyStockTitleButton title={accountTitle(row.secret_code, row.account_title)} />
+                <CopyStockTitleButton title={stockDisplayTitle(row.secret_code, row.account_title)} />
               </div>
             ),
             searchValue: (row) => `${row.account_title} ${row.game_name} ${row.secret_code ?? ""} ${row.assigned_employee?.name ?? ""}`

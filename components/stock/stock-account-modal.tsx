@@ -11,6 +11,7 @@ import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { compressImageFiles } from "@/lib/client-image-compression";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
 
 type SelectedImage = {
@@ -118,9 +119,7 @@ export function StockAccountModal({
   }
 
   function downloadSelectedImages() {
-    const title = stock?.secret_code && stock?.account_title
-      ? `${stock.secret_code} ${stock.account_title}`
-      : stock?.account_title || "stock-account";
+    const title = stockDisplayTitle(stock?.secret_code, stock?.account_title) || "stock-account";
     const baseName = filenameSafe(title);
 
     selectedImages.forEach((image, index) => {
@@ -203,7 +202,17 @@ export function StockAccountModal({
 
               <div className="space-y-2">
                 <Label htmlFor="account_title">Title</Label>
-                <Input id="account_title" name="account_title" required placeholder="TH15 Semi Max" defaultValue={stock?.account_title ?? ""} />
+                <Input
+                  id="account_title"
+                  name="account_title"
+                  required
+                  placeholder="TH15 Semi Max"
+                  defaultValue={stock?.account_title ?? ""}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="words"
+                  spellCheck={false}
+                />
               </div>
 
               {canViewBuyingPrice ? (
@@ -220,7 +229,17 @@ export function StockAccountModal({
 
               <div className="space-y-2">
                 <Label htmlFor="secret_code">Secret code</Label>
-                <Input id="secret_code" name="secret_code" required placeholder="ml1202" defaultValue={stock?.secret_code ?? ""} />
+                <Input
+                  id="secret_code"
+                  name="secret_code"
+                  required
+                  placeholder="ml1202"
+                  defaultValue={stock?.secret_code ?? ""}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
               </div>
 
               <div className="space-y-2">

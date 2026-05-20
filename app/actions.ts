@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient, createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { getCurrentProfile } from "@/lib/data";
+import { cleanSecretCode, stripSecretCodeFromTitle } from "@/lib/stock-title";
 import {
   addDemoSale,
   addDemoDailyTaskCompletion,
@@ -179,6 +180,8 @@ async function logActivity(
 export async function saveStockAccount(formData: FormData) {
   const id = text(formData, "id");
   const hasEnv = hasSupabaseEnv();
+  const secretCode = cleanSecretCode(text(formData, "secret_code"));
+  const accountTitle = stripSecretCodeFromTitle(text(formData, "account_title"), secretCode);
 
   if (!hasEnv) {
     const currentProfile = await getCurrentProfile();
@@ -193,7 +196,7 @@ export async function saveStockAccount(formData: FormData) {
     const demoAccount: StockAccount = {
       id: id ?? `stock-${randomUUID()}`,
       game_name: text(formData, "game_name") ?? "Unknown",
-      account_title: text(formData, "account_title") ?? "Untitled account",
+      account_title: accountTitle || "Untitled account",
       buying_price:
         currentProfile.role === "employee"
           ? existing?.buying_price ?? 0
@@ -201,7 +204,7 @@ export async function saveStockAccount(formData: FormData) {
       selling_price: optionalNumber(formData, "selling_price"),
       image_url: finalImageUrls[0] ?? existing?.image_url ?? null,
       image_urls: finalImageUrls,
-      secret_code: text(formData, "secret_code"),
+      secret_code: secretCode,
       purchase_date: text(formData, "purchase_date") ?? new Date().toISOString().slice(0, 10),
       status: (text(formData, "status") ?? "available") as StockAccount["status"],
       assigned_employee_id: assignedEmployeeId,
@@ -228,14 +231,14 @@ export async function saveStockAccount(formData: FormData) {
     : null;
   const payload = {
     game_name: text(formData, "game_name"),
-    account_title: text(formData, "account_title"),
+    account_title: accountTitle || "Untitled account",
     buying_price:
       profile.role === "employee"
         ? Number(existing?.buying_price ?? 0)
         : number(formData, "buying_price"),
     selling_price: optionalNumber(formData, "selling_price"),
     ...(imageUrls.length ? { image_url: imageUrls[0], image_urls: imageUrls } : {}),
-    secret_code: text(formData, "secret_code"),
+    secret_code: secretCode,
     purchase_date: text(formData, "purchase_date"),
     status: text(formData, "status") ?? "available",
     assigned_employee_id: text(formData, "assigned_employee_id"),

@@ -5,6 +5,7 @@ import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { getCurrentProfile, getSettings, getSoldAccounts } from "@/lib/data";
 import { getProfit } from "@/lib/metrics";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function SoldAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
@@ -42,9 +43,8 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
             header: "Account",
             cell: (row) => (
               <div>
-                <p className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap font-medium">
-                  {row.stock_account?.secret_code ? <span className="shrink-0 font-semibold">{row.stock_account.secret_code}</span> : null}
-                  <span className="min-w-0 truncate">{row.stock_account?.account_title ?? row.stock_account_id}</span>
+                <p className="truncate font-medium">
+                  {stockDisplayTitle(row.stock_account?.secret_code, row.stock_account?.account_title ?? row.stock_account_id)}
                 </p>
                 <p className="text-xs text-muted-foreground">{row.stock_account?.game_name ?? "-"}</p>
               </div>

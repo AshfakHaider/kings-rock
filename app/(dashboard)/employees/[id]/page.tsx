@@ -27,6 +27,7 @@ import {
   getStockAccounts
 } from "@/lib/data";
 import { getAdvanceBalance, getProfit } from "@/lib/metrics";
+import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function EmployeeDetailPage({
@@ -208,8 +209,7 @@ export default async function EmployeeDetailPage({
                 header: "Account",
                 cell: (row) => (
                   <Link href={`/stock-accounts/${row.id}`} className="font-medium text-primary hover:underline">
-                    {row.secret_code ? `${row.secret_code} ` : ""}
-                    {row.account_title}
+                    {stockDisplayTitle(row.secret_code, row.account_title)}
                   </Link>
                 ),
                 searchValue: (row) => `${row.secret_code ?? ""} ${row.account_title} ${row.game_name}`
@@ -243,8 +243,7 @@ export default async function EmployeeDetailPage({
                 cell: (row) => (
                   <div>
                     <p className="font-medium">
-                      {row.stock_account?.secret_code ? `${row.stock_account.secret_code} ` : ""}
-                      {row.stock_account?.account_title ?? row.stock_account_id}
+                      {stockDisplayTitle(row.stock_account?.secret_code, row.stock_account?.account_title ?? row.stock_account_id)}
                     </p>
                     <p className="text-xs text-muted-foreground">{row.stock_account?.game_name ?? "-"}</p>
                   </div>
