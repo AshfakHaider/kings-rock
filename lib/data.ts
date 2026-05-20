@@ -37,6 +37,14 @@ import {
   monthlySeries,
   stockValueByGame
 } from "@/lib/metrics";
+import { normalizeCurrency } from "@/lib/utils";
+
+function normalizeSettings(settings: Settings): Settings {
+  return {
+    ...settings,
+    currency: normalizeCurrency(settings.currency)
+  };
+}
 
 export async function getCurrentProfile(): Promise<Profile> {
   if (!hasSupabaseEnv()) {
@@ -79,15 +87,16 @@ export async function getCurrentProfile(): Promise<Profile> {
 }
 
 export async function getSettings(): Promise<Settings> {
-  if (!hasSupabaseEnv()) return demoSettings;
+  if (!hasSupabaseEnv()) return normalizeSettings(demoSettings);
   const supabase = await createClient();
   const { data } = await supabase.from("settings").select("*").limit(1).single();
-  return (data as Settings) ?? demoSettings;
+  return normalizeSettings((data as Settings) ?? demoSettings);
 }
 
 function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnapshot {
   return {
     ...snapshot,
+    currency: normalizeCurrency(snapshot.currency),
     metrics: {
       totalStockAccounts: Number(snapshot.metrics.totalStockAccounts ?? 0),
       totalStockBuyingValue: Number(snapshot.metrics.totalStockBuyingValue ?? 0),
@@ -142,7 +151,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
         : expenses;
 
     return {
-      currency: settings.currency,
+      currency: normalizeCurrency(settings.currency),
       role: currentProfile.role,
       metrics: getDashboardMetrics({
         stockAccounts,
@@ -184,7 +193,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
       : expenses;
 
   return {
-    currency: settings.currency,
+    currency: normalizeCurrency(settings.currency),
     role: currentProfile.role,
     metrics: getDashboardMetrics({
       stockAccounts,

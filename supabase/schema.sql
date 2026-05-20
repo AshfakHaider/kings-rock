@@ -147,7 +147,7 @@ create table public.activity_logs (
 create table public.settings (
   id uuid primary key default gen_random_uuid(),
   business_name text not null default 'Game Account Manager',
-  currency text not null default 'BDT',
+  currency text not null default 'USD',
   game_categories text[] not null default array['Mobile Legends', 'Clash of Clans'],
   sale_source_websites text[] not null default array['Facebook', 'PlayerAuctions', 'G2G', 'Discord'],
   expense_categories text[] not null default array['gmail_purchase', 'ads', 'website_fee', 'employee_payment', 'scam_account', 'refund_account', 'other'],
@@ -674,7 +674,7 @@ as $$
     limit 1
   ),
   settings_row as (
-    select coalesce((select currency from public.settings limit 1), 'BDT') as currency
+    select coalesce((select currency from public.settings limit 1), 'USD') as currency
   ),
   visible_stock as (
     select sa.*

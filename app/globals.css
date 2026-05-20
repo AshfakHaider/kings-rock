@@ -54,10 +54,6 @@
 }
 
 @layer components {
-  .mobile-safe-bottom {
-    padding-bottom: calc(env(safe-area-inset-bottom) + 5.5rem);
-  }
-
   .glass-panel {
     background:
       radial-gradient(circle at top left, rgba(20, 184, 166, 0.18), transparent 34%),

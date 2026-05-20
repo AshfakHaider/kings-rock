@@ -15,7 +15,7 @@ as $$
     limit 1
   ),
   settings_row as (
-    select coalesce((select currency from public.settings limit 1), 'BDT') as currency
+    select coalesce((select currency from public.settings limit 1), 'USD') as currency
   ),
   visible_stock as (
     select sa.*

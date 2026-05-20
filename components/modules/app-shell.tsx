@@ -57,7 +57,7 @@ export function AppShell({
         </div>
       </aside>
 
-      <main className="mobile-safe-bottom min-w-0 px-4 py-4 sm:px-6 lg:ml-72 lg:px-6 lg:py-8 xl:px-8">
+      <main className="min-w-0 px-4 pb-[calc(env(safe-area-inset-bottom)+9rem)] pt-4 sm:px-6 lg:ml-72 lg:px-6 lg:py-8 xl:px-8">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 lg:hidden">
           <div className="min-w-0 flex-1">
             <p className="text-xs text-muted-foreground">Business Manager</p>

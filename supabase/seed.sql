@@ -1,5 +1,5 @@
 insert into public.settings (business_name, currency, game_categories)
-values ('Kings Rock', 'BDT', array['Mobile Legends', 'Clash of Clans'])
+values ('Kings Rock', 'USD', array['Mobile Legends', 'Clash of Clans'])
 on conflict do nothing;
 
 -- Replace auth_user_id values after creating Supabase Auth users.

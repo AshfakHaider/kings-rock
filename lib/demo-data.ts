@@ -255,7 +255,7 @@ export const demoActivityLogs: ActivityLog[] = [
 export const demoSettings: Settings = {
   id: "settings-demo",
   business_name: "Kings Rock",
-  currency: "BDT",
+  currency: "USD",
   game_categories: ["Mobile Legends", "Clash of Clans"],
   sale_source_websites: ["Facebook", "PlayerAuctions", "G2G", "Discord"],
   expense_categories: [

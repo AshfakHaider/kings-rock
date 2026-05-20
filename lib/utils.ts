@@ -5,11 +5,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function money(value: number | null | undefined, currency = "BDT") {
+export const DEFAULT_CURRENCY = "USD";
+
+export function normalizeCurrency(currency: string | null | undefined) {
+  const normalized = currency?.trim().toUpperCase();
+  if (!normalized || normalized === "BDT") return DEFAULT_CURRENCY;
+  return normalized;
+}
+
+export function money(value: number | null | undefined, currency = DEFAULT_CURRENCY) {
   const amount = Number(value ?? 0);
-  return new Intl.NumberFormat("en-BD", {
+  const normalizedCurrency = normalizeCurrency(currency);
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency,
+    currency: normalizedCurrency,
     maximumFractionDigits: 0
   }).format(amount);
 }

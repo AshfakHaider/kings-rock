@@ -125,7 +125,7 @@ export function MobileMenuPanel({ role }: { role: Role }) {
               </Button>
             </div>
 
-            <nav className="grid min-h-0 flex-1 auto-rows-min gap-2 overflow-y-auto p-4">
+            <nav className="grid min-h-0 flex-1 auto-rows-min gap-2 overflow-y-auto p-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
               {items.map((item) => {
                 const active = isActive(pathname, item.href);
                 return (
