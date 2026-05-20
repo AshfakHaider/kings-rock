@@ -12,7 +12,7 @@ import {
   getSoldAccounts,
   getStockAccounts
 } from "@/lib/data";
-import { getAdvanceBalance, getProfit } from "@/lib/metrics";
+import { getAdvanceBalance, getProfit, salesBySource } from "@/lib/metrics";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function ReportsPage({
@@ -67,6 +67,7 @@ export default async function ReportsPage({
   const grossProfit = sales.reduce((sum, sale) => sum + getProfit(sale), 0);
   const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const visibleAdvanceTransactions = advanceTransactions;
+  const sourceRows = salesBySource(sales);
   type SaleRow = (typeof sales)[number];
 
   return (
@@ -110,6 +111,25 @@ export default async function ReportsPage({
           </div>
         </div>
       ) : null}
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold">Sales by source</h2>
+          <p className="text-sm text-muted-foreground">Filtered source totals for sold accounts.</p>
+        </div>
+        <ResponsiveTable
+          rows={sourceRows}
+          searchPlaceholder="Search sale sources..."
+          emptyTitle="No source sales found"
+          emptyDescription="Try changing the filters or sell accounts with a source name."
+          columns={[
+            { key: "source", header: "Source", cell: (row) => row.source, searchValue: (row) => row.source },
+            { key: "count", header: "Accounts sold", cell: (row) => row.soldCount },
+            { key: "sales", header: "Total sales", cell: (row) => money(row.totalSales, settings.currency) },
+            { key: "profit", header: "Profit", cell: (row) => money(row.profit, settings.currency) }
+          ]}
+        />
+      </section>
 
       <ResponsiveTable
         rows={sales}

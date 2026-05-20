@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { getCurrentProfile, getSettings, getSoldAccounts } from "@/lib/data";
-import { getProfit } from "@/lib/metrics";
+import { getProfit, salesBySource } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -21,6 +21,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
     currentProfile.role === "employee"
       ? allSoldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
       : allSoldAccounts;
+  const sourceRows = salesBySource(soldAccounts);
   type SoldRow = (typeof soldAccounts)[number];
 
   return (
@@ -33,6 +34,27 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
             : "Your sold account history with sale amount, source, and date."
         }
       />
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold">Sales by source</h2>
+          <p className="text-sm text-muted-foreground">See how many accounts each source has sold.</p>
+        </div>
+        <ResponsiveTable
+          rows={sourceRows}
+          searchPlaceholder="Search sale sources..."
+          emptyTitle="No source sales yet"
+          emptyDescription="When accounts are sold, source totals will appear here."
+          columns={[
+            { key: "source", header: "Source", cell: (row) => row.source, searchValue: (row) => row.source },
+            { key: "count", header: "Accounts sold", cell: (row) => row.soldCount },
+            { key: "sales", header: "Total sales", cell: (row) => money(row.totalSales, settings.currency) },
+            ...(canViewProfit
+              ? [{ key: "profit", header: "Profit", cell: (row: (typeof sourceRows)[number]) => money(row.profit, settings.currency) } as const]
+              : [])
+          ]}
+        />
+      </section>
+
       <ResponsiveTable
         rows={soldAccounts}
         searchQuery={params.q}

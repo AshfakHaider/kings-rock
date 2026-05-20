@@ -99,6 +99,27 @@ export function employeeProfitSeries(sales: SoldAccount[]) {
   return Array.from(buckets.values());
 }
 
+export function salesBySource(sales: SoldAccount[]) {
+  const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
+
+  for (const sale of sales) {
+    const source = sale.sold_source_website?.trim() || "Unknown";
+    const item = buckets.get(source.toLowerCase()) ?? {
+      source,
+      soldCount: 0,
+      totalSales: 0,
+      profit: 0
+    };
+
+    item.soldCount += 1;
+    item.totalSales += Number(sale.sold_amount);
+    item.profit += getProfit(sale);
+    buckets.set(source.toLowerCase(), item);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => b.soldCount - a.soldCount || b.totalSales - a.totalSales);
+}
+
 export function stockValueByGame(stockAccounts: StockAccount[]) {
   const buckets = new Map<string, { game: string; value: number }>();
   for (const account of stockAccounts.filter((item) => item.status !== "sold")) {
