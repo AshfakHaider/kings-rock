@@ -28,6 +28,15 @@ function withoutImages<T extends { image_url?: string | null; image_urls?: strin
   };
 }
 
+function withPrivateNotesForCurrentUser<T extends { assigned_employee_id?: string | null; notes?: string | null }>(
+  account: T,
+  currentProfileId: string,
+  isAdmin: boolean
+) {
+  if (isAdmin || account.assigned_employee_id === currentProfileId) return account;
+  return { ...account, notes: null };
+}
+
 export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, stockAccounts, profiles, currentProfile] = await Promise.all([
@@ -60,6 +69,8 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
             employees={profiles.filter((profile) => profile.role !== "admin")}
             gameCategories={settings.game_categories}
             canViewBuyingPrice={canViewBuyingPrice}
+            currentProfileId={currentProfile.id}
+            isAdmin={currentProfile.role === "admin"}
           />
         }
       />
@@ -129,11 +140,13 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
                     <StockAccountModal
                       variant="edit"
                       trigger="icon"
-                      stock={withoutImages(row)}
+                      stock={withPrivateNotesForCurrentUser(withoutImages(row), currentProfile.id, currentProfile.role === "admin")}
                       existingImageCount={row.image_urls?.length ?? (row.image_url ? 1 : 0)}
                       employees={employees}
                       gameCategories={settings.game_categories}
                       canViewBuyingPrice={canViewBuyingPrice}
+                      currentProfileId={currentProfile.id}
+                      isAdmin={currentProfile.role === "admin"}
                     />
                     <form action={deleteStockAccount}>
                       <input type="hidden" name="id" value={row.id} />

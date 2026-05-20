@@ -21,7 +21,6 @@ import {
   upsertDemoExpense,
   upsertDemoProfile,
   upsertDemoGmailAccount,
-  upsertDemoStockAccountCredential,
   upsertDemoStockAccount
 } from "@/lib/demo-store";
 import type { DailyTask, DailyTaskCompletion, Expense, GmailAccount, Profile, SoldAccount, StockAccount } from "@/lib/types";
@@ -38,11 +37,6 @@ function number(formData: FormData, key: string) {
 function optionalNumber(formData: FormData, key: string) {
   const value = text(formData, key);
   return value ? Number(value) : null;
-}
-
-function passwordText(formData: FormData, key: string) {
-  const value = String(formData.get(key) ?? "").trim();
-  return value.length ? value : null;
 }
 
 async function uploadStockImages(formData: FormData) {
@@ -184,30 +178,61 @@ async function logActivity(
   });
 }
 
+function normalizedStockIdentity(value: string | null | undefined) {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isDuplicateStockAccount(
+  account: Pick<StockAccount, "id" | "status" | "secret_code" | "game_name" | "account_title">,
+  currentId: string | null,
+  secretCode: string | null,
+  gameName: string,
+  accountTitle: string
+) {
+  if (account.id === currentId || account.status === "sold") return false;
+
+  const requestedCode = normalizedStockIdentity(secretCode);
+  if (requestedCode && normalizedStockIdentity(account.secret_code) === requestedCode) return true;
+
+  if (requestedCode) return false;
+
+  return (
+    normalizedStockIdentity(account.game_name) === normalizedStockIdentity(gameName) &&
+    normalizedStockIdentity(account.account_title) === normalizedStockIdentity(accountTitle)
+  );
+}
+
 export async function saveStockAccount(formData: FormData) {
   const id = text(formData, "id");
   const hasEnv = hasSupabaseEnv();
   const secretCode = cleanSecretCode(text(formData, "secret_code"));
   const accountTitle = stripSecretCodeFromTitle(text(formData, "account_title"), secretCode);
+  const finalAccountTitle = accountTitle || "Untitled account";
   const gameName = cleanStockText(text(formData, "game_name")) || "Unknown";
-  const notes = cleanStockText(text(formData, "notes")) || null;
-  const stockGmailEmail = cleanStockText(text(formData, "stock_gmail_email")) || null;
-  const stockGmailPassword = passwordText(formData, "stock_gmail_password");
+  const submittedNotes = cleanStockText(text(formData, "notes")) || null;
+  const assignedEmployeeId = text(formData, "assigned_employee_id");
 
   if (!hasEnv) {
     const currentProfile = await getCurrentProfile();
     const imageUrls = await getDemoImageUrls(formData);
-    const assignedEmployeeId = text(formData, "assigned_employee_id");
     const demoProfiles = await getDemoProfiles();
-    const existing = id
-      ? (await getDemoStockAccounts()).find((account) => account.id === id)
-      : null;
+    const demoStockAccounts = await getDemoStockAccounts();
+    const existing = id ? demoStockAccounts.find((account) => account.id === id) : null;
+
+    if (demoStockAccounts.some((account) => isDuplicateStockAccount(account, id, secretCode, gameName, finalAccountTitle))) {
+      throw new Error("Duplicate stock account already exists.");
+    }
+
+    const canSavePrivateNotes =
+      currentProfile.role === "admin" ||
+      assignedEmployeeId === currentProfile.id ||
+      existing?.assigned_employee_id === currentProfile.id;
     const finalImageUrls = imageUrls.length ? imageUrls : (existing?.image_urls ?? []);
     const now = new Date().toISOString();
     const demoAccount: StockAccount = {
       id: id ?? `stock-${randomUUID()}`,
       game_name: gameName,
-      account_title: accountTitle || "Untitled account",
+      account_title: finalAccountTitle,
       buying_price:
         currentProfile.role === "employee"
           ? existing?.buying_price ?? 0
@@ -219,7 +244,7 @@ export async function saveStockAccount(formData: FormData) {
       purchase_date: text(formData, "purchase_date") ?? new Date().toISOString().slice(0, 10),
       status: (text(formData, "status") ?? "available") as StockAccount["status"],
       assigned_employee_id: assignedEmployeeId,
-      notes,
+      notes: canSavePrivateNotes ? submittedNotes : (existing?.notes ?? null),
       created_by: "admin-demo",
       created_at: now,
       updated_at: now,
@@ -227,13 +252,6 @@ export async function saveStockAccount(formData: FormData) {
     };
 
     await upsertDemoStockAccount(demoAccount);
-    if (stockGmailEmail && stockGmailPassword) {
-      await upsertDemoStockAccountCredential({
-        stock_account_id: demoAccount.id,
-        gmail_email: stockGmailEmail,
-        password: stockGmailPassword
-      });
-    }
 
     revalidatePath("/stock-accounts");
     revalidatePath(`/stock-accounts/${demoAccount.id}`);
@@ -245,11 +263,47 @@ export async function saveStockAccount(formData: FormData) {
   const profile = await getCurrentProfile();
   const imageUrls = await uploadStockImages(formData);
   const existing = id
-    ? (await supabase.from("stock_accounts").select("buying_price").eq("id", id).single()).data
+    ? (await supabase.from("stock_accounts").select("buying_price,assigned_employee_id,notes").eq("id", id).single()).data
     : null;
+
+  if (secretCode) {
+    let duplicateCodeQuery = supabase
+      .from("stock_accounts")
+      .select("id")
+      .ilike("secret_code", secretCode)
+      .neq("status", "sold")
+      .limit(1);
+
+    if (id) duplicateCodeQuery = duplicateCodeQuery.neq("id", id);
+
+    const { data: duplicateCode, error: duplicateCodeError } = await duplicateCodeQuery.maybeSingle();
+
+    if (duplicateCodeError) throw new Error(duplicateCodeError.message);
+    if (duplicateCode) throw new Error("Duplicate stock account already exists with this secret code.");
+  } else {
+    let duplicateTitleQuery = supabase
+      .from("stock_accounts")
+      .select("id")
+      .ilike("game_name", gameName)
+      .ilike("account_title", finalAccountTitle)
+      .neq("status", "sold")
+      .limit(1);
+
+    if (id) duplicateTitleQuery = duplicateTitleQuery.neq("id", id);
+
+    const { data: duplicateTitle, error: duplicateTitleError } = await duplicateTitleQuery.maybeSingle();
+
+    if (duplicateTitleError) throw new Error(duplicateTitleError.message);
+    if (duplicateTitle) throw new Error("Duplicate stock account already exists.");
+  }
+
+  const canSavePrivateNotes =
+    profile.role === "admin" ||
+    assignedEmployeeId === profile.id ||
+    existing?.assigned_employee_id === profile.id;
   const payload = {
     game_name: gameName,
-    account_title: accountTitle || "Untitled account",
+    account_title: finalAccountTitle,
     buying_price:
       profile.role === "employee"
         ? Number(existing?.buying_price ?? 0)
@@ -259,8 +313,8 @@ export async function saveStockAccount(formData: FormData) {
     secret_code: secretCode,
     purchase_date: text(formData, "purchase_date"),
     status: text(formData, "status") ?? "available",
-    assigned_employee_id: text(formData, "assigned_employee_id"),
-    notes,
+    assigned_employee_id: assignedEmployeeId,
+    notes: canSavePrivateNotes ? submittedNotes : (existing?.notes ?? null),
     created_by: profile.id
   };
 
@@ -270,32 +324,6 @@ export async function saveStockAccount(formData: FormData) {
 
   if (result.error) {
     throw new Error(result.error.message);
-  }
-
-  if (stockGmailEmail && stockGmailPassword) {
-    const credentialResult = await supabase
-      .from("stock_account_credentials")
-      .upsert(
-        {
-          stock_account_id: result.data.id,
-          gmail_email: stockGmailEmail,
-          encrypted_password: encryptSecret(stockGmailPassword)
-        },
-        { onConflict: "stock_account_id" }
-      );
-
-    if (credentialResult.error) {
-      throw new Error(credentialResult.error.message);
-    }
-  } else if (stockGmailEmail && id) {
-    const credentialResult = await supabase
-      .from("stock_account_credentials")
-      .update({ gmail_email: stockGmailEmail })
-      .eq("stock_account_id", result.data.id);
-
-    if (credentialResult.error) {
-      throw new Error(credentialResult.error.message);
-    }
   }
 
   await logActivity(id ? "account_edited" : "account_added", "stock_accounts", id, null, result.data);

@@ -42,7 +42,9 @@ export function StockAccountModal({
   variant = "add",
   trigger = "default",
   canViewBuyingPrice = true,
-  existingImageCount
+  existingImageCount,
+  currentProfileId,
+  isAdmin = false
 }: {
   employees: Profile[];
   gameCategories: string[];
@@ -51,15 +53,20 @@ export function StockAccountModal({
   trigger?: "default" | "icon";
   canViewBuyingPrice?: boolean;
   existingImageCount?: number;
+  currentProfileId?: string;
+  isAdmin?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [previewImage, setPreviewImage] = useState<SelectedImage | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [assignedEmployeeId, setAssignedEmployeeId] = useState(stock?.assigned_employee_id ?? "");
   const [pending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
   const isEdit = variant === "edit";
+  const canUsePrivateNotes =
+    isAdmin || assignedEmployeeId === currentProfileId || (isEdit && stock?.assigned_employee_id === currentProfileId);
 
   function syncFileInput(images: SelectedImage[]) {
     if (!fileInputRef.current) return;
@@ -135,11 +142,15 @@ export function StockAccountModal({
 
   function submit(formData: FormData) {
     startTransition(async () => {
-      await saveStockAccount(formData);
-      setOpen(false);
-      setImages([]);
-      setPreviewImage(null);
-      router.refresh();
+      try {
+        await saveStockAccount(formData);
+        setOpen(false);
+        setImages([]);
+        setPreviewImage(null);
+        router.refresh();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Account could not be saved.");
+      }
     });
   }
 
@@ -247,35 +258,6 @@ export function StockAccountModal({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="stock_gmail_email">Gmail</Label>
-                <Input
-                  id="stock_gmail_email"
-                  name="stock_gmail_email"
-                  type="email"
-                  placeholder="account@gmail.com"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                />
-                <p className="text-xs text-muted-foreground">Hidden until this account is assigned.</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="stock_gmail_password">Gmail password</Label>
-                <Input
-                  id="stock_gmail_password"
-                  name="stock_gmail_password"
-                  type="password"
-                  placeholder={isEdit ? "Leave blank to keep current password" : "Password"}
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                />
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="purchase_date">Purchase date</Label>
                 <Input
                   id="purchase_date"
@@ -300,7 +282,12 @@ export function StockAccountModal({
 
               <div className="space-y-2">
                 <Label htmlFor="assigned_employee_id">Assigned employee</Label>
-                <Select id="assigned_employee_id" name="assigned_employee_id" defaultValue={stock?.assigned_employee_id ?? ""}>
+                <Select
+                  id="assigned_employee_id"
+                  name="assigned_employee_id"
+                  defaultValue={stock?.assigned_employee_id ?? ""}
+                  onChange={(event) => setAssignedEmployeeId(event.currentTarget.value)}
+                >
                   <option value="">Unassigned</option>
                   {employees.map((employee) => (
                     <option key={employee.id} value={employee.id}>
@@ -379,18 +366,20 @@ export function StockAccountModal({
                 ) : null}
               </div>
 
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="notes">Notes optional</Label>
-                <Textarea
-                  id="notes"
-                  name="notes"
-                  placeholder="Any private note about the account"
-                  defaultValue={stock?.notes ?? ""}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-              </div>
+              {canUsePrivateNotes ? (
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="notes">Private notes optional</Label>
+                  <Textarea
+                    id="notes"
+                    name="notes"
+                    placeholder="Private note. Admin and the assigned person can view this."
+                    defaultValue={stock?.notes ?? ""}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                </div>
+              ) : null}
 
               <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:col-span-2 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={closeModal}>

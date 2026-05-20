@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Calendar, KeyRound, LockKeyhole, Mail, UserRound } from "lucide-react";
+import { ArrowLeft, Calendar, KeyRound, UserRound } from "lucide-react";
 import { PageHeader } from "@/components/modules/page-header";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
@@ -8,8 +8,7 @@ import { StockImageGallery } from "@/components/stock/stock-image-gallery";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CopyValueButton } from "@/components/ui/copy-value-button";
-import { getCurrentProfile, getProfiles, getSettings, getStockAccountCredential, getStockAccounts } from "@/lib/data";
+import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -34,7 +33,8 @@ export default async function StockAccountDetailPage({
   if (!account) notFound();
   const canViewBuyingPrice = currentProfile.role !== "employee";
   const canManageStockRecords = currentProfile.role !== "employee";
-  const credential = await getStockAccountCredential(account, currentProfile);
+  const canViewPrivateNotes = currentProfile.role === "admin" || account.assigned_employee_id === currentProfile.id;
+  const modalStock = canViewPrivateNotes ? account : { ...account, notes: null };
 
   const images =
     account.image_urls && account.image_urls.length > 0
@@ -60,11 +60,13 @@ export default async function StockAccountDetailPage({
             {canManageStockRecords ? (
               <StockAccountModal
                 variant="edit"
-                stock={account}
+                stock={modalStock}
                 existingImageCount={images.length}
                 employees={profiles.filter((profile) => profile.role !== "admin")}
                 gameCategories={settings.game_categories}
                 canViewBuyingPrice={canViewBuyingPrice}
+                currentProfileId={currentProfile.id}
+                isAdmin={currentProfile.role === "admin"}
               />
             ) : null}
           </div>
@@ -116,48 +118,22 @@ export default async function StockAccountDetailPage({
               </span>
               <span>{account.assigned_employee?.name ?? "Unassigned"}</span>
             </div>
-            {credential ? (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Mail className="h-4 w-4" />
-                    Gmail
-                  </span>
-                  <div className="flex min-w-0 max-w-[68%] items-center justify-end gap-2">
-                    <code className="min-w-0 truncate rounded-md bg-muted px-2 py-1 text-sm">
-                      {credential.gmail_email}
-                    </code>
-                    <CopyValueButton value={credential.gmail_email} label="Copy" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <LockKeyhole className="h-4 w-4" />
-                    Password
-                  </span>
-                  <div className="flex min-w-0 max-w-[68%] items-center justify-end gap-2">
-                    <code className="min-w-0 truncate rounded-md bg-muted px-2 py-1 text-sm">
-                      {credential.password ?? "-"}
-                    </code>
-                    {credential.password ? <CopyValueButton value={credential.password} label="Copy" /> : null}
-                  </div>
-                </div>
-              </>
-            ) : null}
           </CardContent>
         </Card>
       </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Notes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-            {account.notes || "No notes added."}
-          </p>
-        </CardContent>
-      </Card>
+      {canViewPrivateNotes ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Private Notes</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+              {account.notes || "No notes added."}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
     </>
   );
 }
