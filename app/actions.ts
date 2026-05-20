@@ -4,13 +4,14 @@ import { randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { revalidatePath } from "next/cache";
-import { createAdminClient, createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { getCurrentProfile } from "@/lib/data";
 import { cleanSecretCode, cleanStockText, stripSecretCodeFromTitle } from "@/lib/stock-title";
 import {
   addDemoSale,
   addDemoDailyTaskCompletion,
+  deleteDemoProfile,
   getDemoDailyTasks,
   getDemoGmailAccounts,
   getDemoExpenses,
@@ -739,6 +740,42 @@ export async function approveEmployee(formData: FormData) {
 
   await logActivity("employee_approved", "profiles", id, oldData, data);
   revalidatePath("/employees");
+}
+
+export async function deleteEmployee(formData: FormData) {
+  const id = text(formData, "id");
+  if (!id) return;
+
+  const currentProfile = await getCurrentProfile();
+  if (currentProfile.role !== "admin") {
+    throw new Error("Only admins can delete employee accounts.");
+  }
+  if (currentProfile.id === id) {
+    throw new Error("You cannot delete your own account.");
+  }
+
+  if (!hasSupabaseEnv()) {
+    await deleteDemoProfile(id);
+    revalidatePath("/employees");
+    revalidatePath(`/employees/${id}`);
+    return;
+  }
+
+  const supabase = await createClient();
+  const { data: oldData } = await supabase.from("profiles").select("*").eq("id", id).single();
+  const { error } = await supabase.from("profiles").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (oldData?.auth_user_id && hasSupabaseAdminEnv()) {
+    await createAdminClient().auth.admin.deleteUser(oldData.auth_user_id);
+  }
+
+  await logActivity("employee_deleted", "profiles", id, oldData, null);
+  revalidatePath("/employees");
+  revalidatePath(`/employees/${id}`);
 }
 
 export async function saveAdvance(formData: FormData) {

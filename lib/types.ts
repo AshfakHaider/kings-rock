@@ -205,4 +205,5 @@ export type DashboardSnapshot = {
   monthlySeries: Array<{ month: string; sales: number; profit: number }>;
   employeeProfitSeries: Array<{ name: string; profit: number; sales: number }>;
   stockValueByGame: Array<{ game: string; value: number }>;
+  salesBySource: Array<{ source: string; soldCount: number; totalSales: number; profit: number }>;
 };

@@ -88,6 +88,14 @@ export async function upsertDemoProfile(profile: Profile) {
   return profile;
 }
 
+export async function deleteDemoProfile(id: string) {
+  const stored = await readStoredProfiles();
+  await writeJsonStore(
+    profileStorePath,
+    stored.filter((profile) => profile.id !== id)
+  );
+}
+
 export async function getDemoStockAccounts() {
   const stored = await readStoredStockAccounts();
   const storedIds = new Set(stored.map((account) => account.id));

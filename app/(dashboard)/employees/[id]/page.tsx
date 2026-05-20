@@ -88,7 +88,11 @@ export default async function EmployeeDetailPage({
     <>
       <PageHeader
         title={employee.name}
-        description="Employee profile, account workload, sales, profit, and fund history."
+        description={
+          canViewFinancials
+            ? "Employee profile, account workload, sales, profit, and fund history."
+            : "Your profile, account workload, sales, and fund history."
+        }
         action={
           <Button asChild variant="outline">
             <Link href="/employees">

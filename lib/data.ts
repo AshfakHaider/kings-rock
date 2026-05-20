@@ -38,6 +38,7 @@ import {
   employeeProfitSeries,
   getDashboardMetrics,
   monthlySeries,
+  salesBySource,
   stockValueByGame
 } from "@/lib/metrics";
 import { normalizeCurrency } from "@/lib/utils";
@@ -125,6 +126,12 @@ function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnaps
       profit: Number(item.profit),
       sales: Number(item.sales)
     })),
+    salesBySource: (snapshot.salesBySource ?? []).map((item) => ({
+      source: item.source,
+      soldCount: Number(item.soldCount),
+      totalSales: Number(item.totalSales),
+      profit: Number(item.profit)
+    })),
     stockValueByGame: (snapshot.stockValueByGame ?? []).map((item) => ({
       game: item.game,
       value: Number(item.value)
@@ -165,6 +172,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
       }),
       monthlySeries: monthlySeries(visibleSoldAccounts),
       employeeProfitSeries: employeeProfitSeries(soldAccounts),
+      salesBySource: salesBySource(visibleSoldAccounts),
       stockValueByGame: stockValueByGame(stockAccounts)
     };
   }
@@ -207,6 +215,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     }),
     monthlySeries: monthlySeries(visibleSoldAccounts),
     employeeProfitSeries: employeeProfitSeries(soldAccounts),
+    salesBySource: salesBySource(visibleSoldAccounts),
     stockValueByGame: stockValueByGame(stockAccounts)
   };
 }

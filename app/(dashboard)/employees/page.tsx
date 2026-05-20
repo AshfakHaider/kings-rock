@@ -1,5 +1,6 @@
-import { approveEmployee } from "@/app/actions";
+import { approveEmployee, deleteEmployee } from "@/app/actions";
 import { EmployeeModal } from "@/components/employees/employee-modal";
+import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
@@ -91,6 +92,23 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: P
                       </form>
                     ) : (
                       <span className="text-xs text-muted-foreground">Approved</span>
+                    )
+                } as const
+              ]
+            : []),
+          ...(canApproveEmployees
+            ? [
+                {
+                  key: "actions",
+                  header: "Actions",
+                  cell: (row: EmployeeRow) =>
+                    row.id === currentProfile.id ? (
+                      <span className="text-xs text-muted-foreground">Current user</span>
+                    ) : (
+                      <form action={deleteEmployee}>
+                        <input type="hidden" name="id" value={row.id} />
+                        <DeleteButton label="Delete employee" iconOnly />
+                      </form>
                     )
                 } as const
               ]
