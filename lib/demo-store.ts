@@ -258,6 +258,24 @@ export async function upsertDemoDailyTask(task: DailyTask) {
   return normalized;
 }
 
+export async function deleteDemoDailyTask(id: string) {
+  const [tasks, completions] = await Promise.all([
+    readStoredDailyTasks(),
+    readStoredDailyTaskCompletions()
+  ]);
+
+  await Promise.all([
+    writeJsonStore(
+      dailyTaskStorePath,
+      tasks.filter((task) => task.id !== id)
+    ),
+    writeJsonStore(
+      dailyTaskCompletionStorePath,
+      completions.filter((completion) => completion.task_id !== id)
+    )
+  ]);
+}
+
 export async function getDemoDailyTaskCompletions() {
   const stored = await readStoredDailyTaskCompletions();
   const [profiles, tasks] = await Promise.all([getDemoProfiles(), getDemoDailyTasks()]);

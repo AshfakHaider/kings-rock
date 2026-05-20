@@ -11,6 +11,7 @@ import { cleanSecretCode, cleanStockText, stripSecretCodeFromTitle } from "@/lib
 import {
   addDemoSale,
   addDemoDailyTaskCompletion,
+  deleteDemoDailyTask,
   deleteDemoProfile,
   getDemoDailyTasks,
   getDemoGmailAccounts,
@@ -432,6 +433,36 @@ export async function saveDailyTask(formData: FormData) {
   revalidatePath("/monthly-performance");
 }
 
+export async function deleteDailyTask(formData: FormData) {
+  const profile = await getCurrentProfile();
+  const id = String(formData.get("id") ?? "");
+
+  if (profile.role === "employee") {
+    throw new Error("Employees cannot delete daily tasks.");
+  }
+
+  if (!hasSupabaseEnv()) {
+    await deleteDemoDailyTask(id);
+    revalidatePath("/daily-tasks");
+    revalidatePath("/leaderboard");
+    revalidatePath("/monthly-performance");
+    return;
+  }
+
+  const supabase = await createClient();
+  const { data: oldData } = await supabase.from("daily_tasks").select("*").eq("id", id).single();
+  const { error } = await supabase.from("daily_tasks").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await logActivity("daily_task_deleted", "daily_tasks", id, oldData, null);
+  revalidatePath("/daily-tasks");
+  revalidatePath("/leaderboard");
+  revalidatePath("/monthly-performance");
+}
+
 export async function completeDailyTask(formData: FormData) {
   const profile = await getCurrentProfile();
   const taskId = String(formData.get("task_id") ?? "");
@@ -843,6 +874,33 @@ export async function saveAdvance(formData: FormData) {
   revalidatePath("/");
 }
 
+export async function deleteAdvance(formData: FormData) {
+  const profile = await getCurrentProfile();
+  const id = String(formData.get("id") ?? "");
+
+  if (profile.role === "employee") {
+    throw new Error("Employees cannot delete funds.");
+  }
+
+  if (!hasSupabaseEnv()) {
+    revalidatePath("/advances");
+    revalidatePath("/");
+    return;
+  }
+
+  const supabase = await createClient();
+  const { data: oldData } = await supabase.from("employee_advances").select("*").eq("id", id).single();
+  const { error } = await supabase.from("employee_advances").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await logActivity("advance_deleted", "employee_advances", id, oldData, null);
+  revalidatePath("/advances");
+  revalidatePath("/");
+}
+
 export async function saveAdvanceTransaction(formData: FormData) {
   if (!hasSupabaseEnv()) return;
   const supabase = await createClient();
@@ -859,6 +917,33 @@ export async function saveAdvanceTransaction(formData: FormData) {
   };
   const { data } = await supabase.from("advance_transactions").insert(payload).select().single();
   await logActivity("advance_transaction_added", "advance_transactions", data?.id ?? null, null, data);
+  revalidatePath("/advances");
+  revalidatePath("/");
+}
+
+export async function deleteAdvanceTransaction(formData: FormData) {
+  const profile = await getCurrentProfile();
+  const id = String(formData.get("id") ?? "");
+
+  if (profile.role === "employee") {
+    throw new Error("Employees cannot delete fund transactions.");
+  }
+
+  if (!hasSupabaseEnv()) {
+    revalidatePath("/advances");
+    revalidatePath("/");
+    return;
+  }
+
+  const supabase = await createClient();
+  const { data: oldData } = await supabase.from("advance_transactions").select("*").eq("id", id).single();
+  const { error } = await supabase.from("advance_transactions").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await logActivity("advance_transaction_deleted", "advance_transactions", id, oldData, null);
   revalidatePath("/advances");
   revalidatePath("/");
 }

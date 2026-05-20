@@ -1,4 +1,6 @@
+import { deleteAdvance, deleteAdvanceTransaction } from "@/app/actions";
 import { FormCard, AdvanceForm, AdvanceTransactionForm } from "@/components/modules/forms";
+import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
@@ -42,7 +44,17 @@ export default async function AdvancesPage({ searchParams }: { searchParams?: Pr
           { key: "purpose", header: "Purpose", cell: (row) => row.purpose ?? "-", searchValue: (row) => row.purpose ?? "" },
           { key: "method", header: "Method", cell: (row) => row.payment_method ?? "-" },
           { key: "status", header: "Status", cell: (row) => <StatusBadge value={row.status} />, searchValue: (row) => row.status },
-          { key: "date", header: "Date", cell: (row) => formatDate(row.date_given) }
+          { key: "date", header: "Date", cell: (row) => formatDate(row.date_given) },
+          {
+            key: "actions",
+            header: "Actions",
+            cell: (row) => (
+              <form action={deleteAdvance}>
+                <input type="hidden" name="id" value={row.id} />
+                <DeleteButton label="Delete fund" iconOnly />
+              </form>
+            )
+          }
         ]}
       />
       <ResponsiveTable
@@ -54,7 +66,17 @@ export default async function AdvancesPage({ searchParams }: { searchParams?: Pr
           { key: "amount", header: "Amount", cell: (row) => money(row.amount, settings.currency) },
           { key: "stock", header: "Stock link", cell: (row) => row.stock_account_id ?? "-" },
           { key: "date", header: "Date", cell: (row) => formatDate(row.transaction_date) },
-          { key: "notes", header: "Notes", cell: (row) => row.notes ?? "-", searchValue: (row) => row.notes ?? "" }
+          { key: "notes", header: "Notes", cell: (row) => row.notes ?? "-", searchValue: (row) => row.notes ?? "" },
+          {
+            key: "actions",
+            header: "Actions",
+            cell: (row) => (
+              <form action={deleteAdvanceTransaction}>
+                <input type="hidden" name="id" value={row.id} />
+                <DeleteButton label="Delete transaction" iconOnly />
+              </form>
+            )
+          }
         ]}
       />
     </>

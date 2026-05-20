@@ -1,7 +1,9 @@
 import { ClipboardCheck, ListChecks, Trophy, Users } from "lucide-react";
+import { deleteDailyTask } from "@/app/actions";
 import { CompleteTaskButton } from "@/components/daily-tasks/complete-task-button";
 import { DailyTaskModal } from "@/components/daily-tasks/daily-task-modal";
 import { TaskProofGallery } from "@/components/daily-tasks/task-proof-gallery";
+import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatCard } from "@/components/modules/stat-card";
@@ -172,6 +174,16 @@ export default async function DailyTasksPage({
                   header: "Completed by",
                   cell: (row: (typeof taskRows)[number]) => row.completedNames || "-",
                   searchValue: (row: (typeof taskRows)[number]) => row.completedNames
+                } as const,
+                {
+                  key: "actions",
+                  header: "Actions",
+                  cell: (row: (typeof taskRows)[number]) => (
+                    <form action={deleteDailyTask}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <DeleteButton label="Delete task" iconOnly />
+                    </form>
+                  )
                 } as const
               ]
             : [
