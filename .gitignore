@@ -14,4 +14,5 @@ coverage
 .demo-expenses.json
 .demo-daily-tasks.json
 .demo-daily-task-completions.json
+.demo-stock-credentials.json
 public/demo-uploads

@@ -8,6 +8,7 @@ import { StockImageGallery } from "@/components/stock/stock-image-gallery";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CopyValueButton } from "@/components/ui/copy-value-button";
 import { getCurrentProfile, getProfiles, getSettings, getStockAccountCredential, getStockAccounts } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
@@ -122,18 +123,24 @@ export default async function StockAccountDetailPage({
                     <Mail className="h-4 w-4" />
                     Gmail
                   </span>
-                  <code className="min-w-0 max-w-[60%] truncate rounded-md bg-muted px-2 py-1 text-sm">
-                    {credential.gmail_email}
-                  </code>
+                  <div className="flex min-w-0 max-w-[68%] items-center justify-end gap-2">
+                    <code className="min-w-0 truncate rounded-md bg-muted px-2 py-1 text-sm">
+                      {credential.gmail_email}
+                    </code>
+                    <CopyValueButton value={credential.gmail_email} label="Copy" />
+                  </div>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm text-muted-foreground">
                     <LockKeyhole className="h-4 w-4" />
                     Password
                   </span>
-                  <code className="min-w-0 max-w-[60%] truncate rounded-md bg-muted px-2 py-1 text-sm">
-                    {credential.password ?? "-"}
-                  </code>
+                  <div className="flex min-w-0 max-w-[68%] items-center justify-end gap-2">
+                    <code className="min-w-0 truncate rounded-md bg-muted px-2 py-1 text-sm">
+                      {credential.password ?? "-"}
+                    </code>
+                    {credential.password ? <CopyValueButton value={credential.password} label="Copy" /> : null}
+                  </div>
                 </div>
               </>
             ) : null}
