@@ -59,6 +59,14 @@ create table public.stock_accounts (
   updated_at timestamptz not null default now()
 );
 
+create table public.stock_account_credentials (
+  stock_account_id uuid primary key references public.stock_accounts(id) on delete cascade,
+  gmail_email text not null,
+  encrypted_password text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.gmail_inventory
   add constraint gmail_inventory_stock_account_fk
   foreign key (used_for_stock_account_id) references public.stock_accounts(id) on delete set null;
@@ -226,6 +234,10 @@ create trigger touch_stock_accounts_updated_at
 before update on public.stock_accounts
 for each row execute function public.touch_updated_at();
 
+create trigger touch_stock_account_credentials_updated_at
+before update on public.stock_account_credentials
+for each row execute function public.touch_updated_at();
+
 create trigger touch_settings_updated_at
 before update on public.settings
 for each row execute function public.touch_updated_at();
@@ -282,6 +294,7 @@ create index stock_accounts_assigned_employee_id_idx on public.stock_accounts(as
 create index stock_accounts_game_name_idx on public.stock_accounts(game_name);
 create index stock_accounts_secret_code_idx on public.stock_accounts(secret_code);
 create index stock_accounts_purchase_date_idx on public.stock_accounts(purchase_date);
+create index stock_account_credentials_gmail_email_idx on public.stock_account_credentials(gmail_email);
 create index sold_accounts_employee_id_idx on public.sold_accounts(employee_id);
 create index sold_accounts_sold_date_idx on public.sold_accounts(sold_date);
 create index gmail_inventory_status_idx on public.gmail_inventory(status);
@@ -294,6 +307,7 @@ create index activity_logs_created_at_idx on public.activity_logs(created_at des
 
 alter table public.profiles enable row level security;
 alter table public.stock_accounts enable row level security;
+alter table public.stock_account_credentials enable row level security;
 alter table public.sold_accounts enable row level security;
 alter table public.gmail_inventory enable row level security;
 alter table public.employee_advances enable row level security;
@@ -333,6 +347,50 @@ with check (public.is_manager_or_admin());
 create policy "stock admin manager delete"
 on public.stock_accounts for delete
 using (public.is_manager_or_admin());
+
+create policy "stock credentials read assigned"
+on public.stock_account_credentials for select
+using (
+  public.is_manager_or_admin()
+  or exists (
+    select 1 from public.stock_accounts sa
+    where sa.id = stock_account_id
+      and sa.assigned_employee_id = public.current_profile_id()
+      and sa.assigned_employee_id is not null
+  )
+);
+
+create policy "stock credentials insert owner"
+on public.stock_account_credentials for insert
+with check (
+  public.is_manager_or_admin()
+  or exists (
+    select 1 from public.stock_accounts sa
+    where sa.id = stock_account_id
+      and sa.created_by = public.current_profile_id()
+  )
+);
+
+create policy "stock credentials update owner"
+on public.stock_account_credentials for update
+using (
+  public.is_manager_or_admin()
+  or exists (
+    select 1 from public.stock_accounts sa
+    where sa.id = stock_account_id
+      and (sa.created_by = public.current_profile_id() or sa.assigned_employee_id = public.current_profile_id())
+  )
+)
+with check (
+  public.is_manager_or_admin()
+  or exists (
+    select 1 from public.stock_accounts sa
+    where sa.id = stock_account_id
+      and (sa.created_by = public.current_profile_id() or sa.assigned_employee_id = public.current_profile_id())
+  )
+);
+
+grant select, insert, update on public.stock_account_credentials to authenticated;
 
 create policy "sales read by role"
 on public.sold_accounts for select

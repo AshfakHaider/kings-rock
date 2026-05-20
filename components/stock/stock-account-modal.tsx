@@ -189,6 +189,10 @@ export function StockAccountModal({
                   required
                   placeholder="Mobile Legends"
                   defaultValue={stock?.game_name ?? gameCategories[0] ?? "Mobile Legends"}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="words"
+                  spellCheck={false}
                 />
                 <datalist id="game_name_suggestions">
                   {gameCategories.map((game) => (
@@ -218,13 +222,13 @@ export function StockAccountModal({
               {canViewBuyingPrice ? (
                 <div className="space-y-2">
                   <Label htmlFor="buying_price">Buying price</Label>
-                  <Input id="buying_price" name="buying_price" type="number" min="0" required placeholder="12000" defaultValue={stock?.buying_price ?? ""} />
+                  <Input id="buying_price" name="buying_price" type="number" min="0" required placeholder="12000" defaultValue={stock?.buying_price ?? ""} autoComplete="off" />
                 </div>
               ) : null}
 
               <div className="space-y-2">
                 <Label htmlFor="selling_price">Selling price</Label>
-                <Input id="selling_price" name="selling_price" type="number" min="0" required placeholder="16800" defaultValue={stock?.selling_price ?? ""} />
+                <Input id="selling_price" name="selling_price" type="number" min="0" required placeholder="16800" defaultValue={stock?.selling_price ?? ""} autoComplete="off" />
               </div>
 
               <div className="space-y-2">
@@ -243,6 +247,35 @@ export function StockAccountModal({
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="stock_gmail_email">Gmail</Label>
+                <Input
+                  id="stock_gmail_email"
+                  name="stock_gmail_email"
+                  type="email"
+                  placeholder="account@gmail.com"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">Hidden until this account is assigned.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="stock_gmail_password">Gmail password</Label>
+                <Input
+                  id="stock_gmail_password"
+                  name="stock_gmail_password"
+                  type="password"
+                  placeholder={isEdit ? "Leave blank to keep current password" : "Password"}
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="purchase_date">Purchase date</Label>
                 <Input
                   id="purchase_date"
@@ -250,6 +283,7 @@ export function StockAccountModal({
                   type="date"
                   required
                   defaultValue={stock?.purchase_date ?? formatDateValue(new Date())}
+                  autoComplete="off"
                 />
               </div>
 
@@ -347,7 +381,15 @@ export function StockAccountModal({
 
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="notes">Notes optional</Label>
-                <Textarea id="notes" name="notes" placeholder="Any private note about the account" defaultValue={stock?.notes ?? ""} />
+                <Textarea
+                  id="notes"
+                  name="notes"
+                  placeholder="Any private note about the account"
+                  defaultValue={stock?.notes ?? ""}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
               </div>
 
               <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:col-span-2 sm:flex-row sm:justify-end">

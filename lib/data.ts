@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { decryptSecret } from "@/lib/crypto";
 import {
   demoActivityLogs,
   demoAdvanceTransactions,
@@ -14,6 +15,7 @@ import {
   getDemoGmailAccounts,
   getDemoProfiles,
   getDemoSoldAccounts,
+  getDemoStockAccountCredential,
   getDemoStockAccounts
 } from "@/lib/demo-store";
 import type {
@@ -29,7 +31,8 @@ import type {
   Profile,
   Settings,
   SoldAccount,
-  StockAccount
+  StockAccount,
+  StockAccountCredential
 } from "@/lib/types";
 import {
   employeeProfitSeries,
@@ -223,6 +226,43 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
     .select("*, assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)")
     .order("created_at", { ascending: false });
   return (data as StockAccount[]) ?? [];
+}
+
+export async function getStockAccountCredential(
+  account: StockAccount,
+  profile?: Profile
+): Promise<StockAccountCredential | null> {
+  const currentProfile = profile ?? (await getCurrentProfile());
+  const isAssigned = Boolean(account.assigned_employee_id);
+  const canViewCredential =
+    isAssigned &&
+    (currentProfile.role === "admin" ||
+      currentProfile.role === "manager" ||
+      account.assigned_employee_id === currentProfile.id);
+
+  if (!canViewCredential) return null;
+
+  if (!hasSupabaseEnv()) {
+    return getDemoStockAccountCredential(account.id);
+  }
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("stock_account_credentials")
+    .select("stock_account_id,gmail_email,encrypted_password,created_at,updated_at")
+    .eq("stock_account_id", account.id)
+    .maybeSingle();
+
+  if (!data) return null;
+  const credential = data as StockAccountCredential;
+
+  return {
+    stock_account_id: credential.stock_account_id,
+    gmail_email: credential.gmail_email,
+    password: credential.encrypted_password ? decryptSecret(credential.encrypted_password) : null,
+    created_at: credential.created_at,
+    updated_at: credential.updated_at
+  };
 }
 
 export async function getSoldAccounts(): Promise<SoldAccount[]> {

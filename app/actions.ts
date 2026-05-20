@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient, createClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { getCurrentProfile } from "@/lib/data";
-import { cleanSecretCode, stripSecretCodeFromTitle } from "@/lib/stock-title";
+import { cleanSecretCode, cleanStockText, stripSecretCodeFromTitle } from "@/lib/stock-title";
 import {
   addDemoSale,
   addDemoDailyTaskCompletion,
@@ -20,6 +20,7 @@ import {
   upsertDemoExpense,
   upsertDemoProfile,
   upsertDemoGmailAccount,
+  upsertDemoStockAccountCredential,
   upsertDemoStockAccount
 } from "@/lib/demo-store";
 import type { DailyTask, DailyTaskCompletion, Expense, GmailAccount, Profile, SoldAccount, StockAccount } from "@/lib/types";
@@ -36,6 +37,11 @@ function number(formData: FormData, key: string) {
 function optionalNumber(formData: FormData, key: string) {
   const value = text(formData, key);
   return value ? Number(value) : null;
+}
+
+function passwordText(formData: FormData, key: string) {
+  const value = String(formData.get(key) ?? "").trim();
+  return value.length ? value : null;
 }
 
 async function uploadStockImages(formData: FormData) {
@@ -182,6 +188,10 @@ export async function saveStockAccount(formData: FormData) {
   const hasEnv = hasSupabaseEnv();
   const secretCode = cleanSecretCode(text(formData, "secret_code"));
   const accountTitle = stripSecretCodeFromTitle(text(formData, "account_title"), secretCode);
+  const gameName = cleanStockText(text(formData, "game_name")) || "Unknown";
+  const notes = cleanStockText(text(formData, "notes")) || null;
+  const stockGmailEmail = cleanStockText(text(formData, "stock_gmail_email")) || null;
+  const stockGmailPassword = passwordText(formData, "stock_gmail_password");
 
   if (!hasEnv) {
     const currentProfile = await getCurrentProfile();
@@ -195,7 +205,7 @@ export async function saveStockAccount(formData: FormData) {
     const now = new Date().toISOString();
     const demoAccount: StockAccount = {
       id: id ?? `stock-${randomUUID()}`,
-      game_name: text(formData, "game_name") ?? "Unknown",
+      game_name: gameName,
       account_title: accountTitle || "Untitled account",
       buying_price:
         currentProfile.role === "employee"
@@ -208,7 +218,7 @@ export async function saveStockAccount(formData: FormData) {
       purchase_date: text(formData, "purchase_date") ?? new Date().toISOString().slice(0, 10),
       status: (text(formData, "status") ?? "available") as StockAccount["status"],
       assigned_employee_id: assignedEmployeeId,
-      notes: text(formData, "notes"),
+      notes,
       created_by: "admin-demo",
       created_at: now,
       updated_at: now,
@@ -216,6 +226,13 @@ export async function saveStockAccount(formData: FormData) {
     };
 
     await upsertDemoStockAccount(demoAccount);
+    if (stockGmailEmail && stockGmailPassword) {
+      await upsertDemoStockAccountCredential({
+        stock_account_id: demoAccount.id,
+        gmail_email: stockGmailEmail,
+        password: stockGmailPassword
+      });
+    }
 
     revalidatePath("/stock-accounts");
     revalidatePath(`/stock-accounts/${demoAccount.id}`);
@@ -230,7 +247,7 @@ export async function saveStockAccount(formData: FormData) {
     ? (await supabase.from("stock_accounts").select("buying_price").eq("id", id).single()).data
     : null;
   const payload = {
-    game_name: text(formData, "game_name"),
+    game_name: gameName,
     account_title: accountTitle || "Untitled account",
     buying_price:
       profile.role === "employee"
@@ -242,7 +259,7 @@ export async function saveStockAccount(formData: FormData) {
     purchase_date: text(formData, "purchase_date"),
     status: text(formData, "status") ?? "available",
     assigned_employee_id: text(formData, "assigned_employee_id"),
-    notes: text(formData, "notes"),
+    notes,
     created_by: profile.id
   };
 
@@ -252,6 +269,32 @@ export async function saveStockAccount(formData: FormData) {
 
   if (result.error) {
     throw new Error(result.error.message);
+  }
+
+  if (stockGmailEmail && stockGmailPassword) {
+    const credentialResult = await supabase
+      .from("stock_account_credentials")
+      .upsert(
+        {
+          stock_account_id: result.data.id,
+          gmail_email: stockGmailEmail,
+          encrypted_password: encryptSecret(stockGmailPassword)
+        },
+        { onConflict: "stock_account_id" }
+      );
+
+    if (credentialResult.error) {
+      throw new Error(credentialResult.error.message);
+    }
+  } else if (stockGmailEmail && id) {
+    const credentialResult = await supabase
+      .from("stock_account_credentials")
+      .update({ gmail_email: stockGmailEmail })
+      .eq("stock_account_id", result.data.id);
+
+    if (credentialResult.error) {
+      throw new Error(credentialResult.error.message);
+    }
   }
 
   await logActivity(id ? "account_edited" : "account_added", "stock_accounts", id, null, result.data);

@@ -44,6 +44,15 @@ export type StockAccount = {
   assigned_employee?: Pick<Profile, "id" | "name" | "email"> | null;
 };
 
+export type StockAccountCredential = {
+  stock_account_id: string;
+  gmail_email: string;
+  password?: string | null;
+  encrypted_password?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type SoldAccount = {
   id: string;
   stock_account_id: string;

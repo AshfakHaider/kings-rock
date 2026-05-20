@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Calendar, KeyRound, UserRound } from "lucide-react";
+import { ArrowLeft, Calendar, KeyRound, LockKeyhole, Mail, UserRound } from "lucide-react";
 import { PageHeader } from "@/components/modules/page-header";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
@@ -8,7 +8,7 @@ import { StockImageGallery } from "@/components/stock/stock-image-gallery";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { getCurrentProfile, getProfiles, getSettings, getStockAccountCredential, getStockAccounts } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ export default async function StockAccountDetailPage({
   if (!account) notFound();
   const canViewBuyingPrice = currentProfile.role !== "employee";
   const canManageStockRecords = currentProfile.role !== "employee";
+  const credential = await getStockAccountCredential(account, currentProfile);
 
   const images =
     account.image_urls && account.image_urls.length > 0
@@ -114,6 +115,28 @@ export default async function StockAccountDetailPage({
               </span>
               <span>{account.assigned_employee?.name ?? "Unassigned"}</span>
             </div>
+            {credential ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Mail className="h-4 w-4" />
+                    Gmail
+                  </span>
+                  <code className="min-w-0 max-w-[60%] truncate rounded-md bg-muted px-2 py-1 text-sm">
+                    {credential.gmail_email}
+                  </code>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <LockKeyhole className="h-4 w-4" />
+                    Password
+                  </span>
+                  <code className="min-w-0 max-w-[60%] truncate rounded-md bg-muted px-2 py-1 text-sm">
+                    {credential.password ?? "-"}
+                  </code>
+                </div>
+              </>
+            ) : null}
           </CardContent>
         </Card>
       </section>

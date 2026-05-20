@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "fs/promises";
 import path from "path";
 import { demoExpenses, demoGmail, demoProfiles, demoSoldAccounts, demoStockAccounts } from "@/lib/demo-data";
-import type { DailyTask, DailyTaskCompletion, Expense, GmailAccount, Profile, SoldAccount, StockAccount } from "@/lib/types";
+import type { DailyTask, DailyTaskCompletion, Expense, GmailAccount, Profile, SoldAccount, StockAccount, StockAccountCredential } from "@/lib/types";
 
 const stockStorePath = path.join(process.cwd(), ".demo-stock-accounts.json");
 const soldStorePath = path.join(process.cwd(), ".demo-sold-accounts.json");
@@ -10,6 +10,7 @@ const profileStorePath = path.join(process.cwd(), ".demo-profiles.json");
 const expenseStorePath = path.join(process.cwd(), ".demo-expenses.json");
 const dailyTaskStorePath = path.join(process.cwd(), ".demo-daily-tasks.json");
 const dailyTaskCompletionStorePath = path.join(process.cwd(), ".demo-daily-task-completions.json");
+const stockCredentialStorePath = path.join(process.cwd(), ".demo-stock-credentials.json");
 const jsonCache = new Map<string, unknown[]>();
 
 async function readJsonStore<T>(filePath: string) {
@@ -58,6 +59,10 @@ async function readStoredDailyTasks() {
 
 async function readStoredDailyTaskCompletions() {
   return readJsonStore<DailyTaskCompletion>(dailyTaskCompletionStorePath);
+}
+
+async function readStoredStockCredentials() {
+  return readJsonStore<StockAccountCredential>(stockCredentialStorePath);
 }
 
 export async function getDemoProfiles() {
@@ -109,6 +114,35 @@ export async function upsertDemoStockAccount(account: StockAccount) {
   }
 
   await writeJsonStore(stockStorePath, stored);
+  return normalized;
+}
+
+export async function getDemoStockAccountCredential(stockAccountId: string) {
+  const stored = await readStoredStockCredentials();
+  return stored.find((credential) => credential.stock_account_id === stockAccountId) ?? null;
+}
+
+export async function upsertDemoStockAccountCredential(credential: StockAccountCredential) {
+  const stored = await readStoredStockCredentials();
+  const index = stored.findIndex((item) => item.stock_account_id === credential.stock_account_id);
+  const normalized = {
+    ...credential,
+    updated_at: new Date().toISOString()
+  };
+
+  if (index >= 0) {
+    stored[index] = {
+      ...stored[index],
+      ...normalized
+    };
+  } else {
+    stored.unshift({
+      ...normalized,
+      created_at: normalized.created_at ?? new Date().toISOString()
+    });
+  }
+
+  await writeJsonStore(stockCredentialStorePath, stored);
   return normalized;
 }
 
