@@ -7,6 +7,7 @@ import { saveSale } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
@@ -19,15 +20,25 @@ export function MarkSoldModal({
   employees: Profile[];
 }) {
   const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
 
   function submit(formData: FormData) {
     startTransition(async () => {
-      await saveSale(formData);
-      setOpen(false);
-      router.refresh();
+      try {
+        await saveSale(formData);
+        setOpen(false);
+        router.refresh();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Sale could not be saved.";
+        const staleAction = message.includes("was not found on the server") || message.includes("UnrecognizedActionError");
+        setNotice(staleAction ? "The app was updated. Refreshing, then please try again." : message);
+        if (staleAction) {
+          window.setTimeout(() => window.location.reload(), 900);
+        }
+      }
     });
   }
 
@@ -115,6 +126,7 @@ export function MarkSoldModal({
           </div>
         </div>
       ) : null}
+      <NoticeToast message={notice} onClose={() => setNotice(null)} />
     </>
   );
 }
