@@ -5,29 +5,12 @@ import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatCard } from "@/components/modules/stat-card";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/modules/status-badge";
 import { getCurrentProfile, getExpenses, getProfiles, getSettings } from "@/lib/data";
 import type { Expense } from "@/lib/types";
 import { formatDate, money } from "@/lib/utils";
 
 const lossCategories = ["scam_account", "refund_account"] as const;
-
-function lossTitle(category: string) {
-  const normalized = normalizeLossCategory(category);
-  if (normalized === "scam_account") return "Scam account";
-  if (normalized === "refund_account") return "Refund account";
-  return category.replaceAll("_", " ");
-}
-
-function LossTypeBadge({ category }: { category: string }) {
-  const normalized = normalizeLossCategory(category);
-  const className =
-    normalized === "refund_account"
-      ? "border-sky-500/30 bg-sky-500/12 text-sky-300"
-      : "border-red-500/30 bg-red-500/12 text-red-300";
-
-  return <Badge className={className}>{lossTitle(category)}</Badge>;
-}
 
 function normalizeLossCategory(category: string) {
   const normalized = category.toLowerCase().trim().replace(/[\s-]+/g, "_");
@@ -124,7 +107,7 @@ export default async function LossesPage({ searchParams }: { searchParams?: Prom
         emptyDescription="Add scam or refund account damage to track it against profit."
         columns={[
           { key: "title", header: "Account / Title", cell: (row) => row.title, searchValue: (row) => row.title },
-          { key: "type", header: "Type", cell: (row) => <LossTypeBadge category={row.category} />, searchValue: (row) => row.category },
+          { key: "type", header: "Type", cell: (row) => <StatusBadge value={normalizeLossCategory(row.category)} />, searchValue: (row) => row.category },
           { key: "amount", header: "Loss", cell: (row) => money(row.amount, settings.currency) },
           { key: "date", header: "Date", cell: (row) => formatDate(row.expense_date) },
           { key: "paid", header: "Recorded by", cell: (row) => row.payer?.name ?? row.paid_by ?? "-", searchValue: (row) => row.payer?.name ?? row.paid_by ?? "" },
