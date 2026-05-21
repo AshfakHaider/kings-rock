@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { getCurrentProfile } from "@/lib/data";
@@ -974,11 +975,18 @@ export async function deleteAdvance(formData: FormData) {
   if (!hasSupabaseEnv()) {
     revalidatePath("/advances");
     revalidatePath("/");
-    return;
+    redirect("/advances");
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("employee_advances").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("employee_advances").select("*").eq("id", id).maybeSingle();
+  const { data: oldTransactions } = await supabase.from("advance_transactions").select("*").eq("advance_id", id);
+  const { error: transactionDeleteError } = await supabase.from("advance_transactions").delete().eq("advance_id", id);
+
+  if (transactionDeleteError) {
+    throw new Error(transactionDeleteError.message);
+  }
+
   const { error } = await supabase.from("employee_advances").delete().eq("id", id);
 
   if (error) {
@@ -986,8 +994,14 @@ export async function deleteAdvance(formData: FormData) {
   }
 
   await logActivity("advance_deleted", "employee_advances", id, oldData, null);
+  if (oldTransactions?.length) {
+    await logActivity("advance_transactions_deleted", "advance_transactions", id, oldTransactions, null);
+  }
   revalidatePath("/advances");
+  revalidatePath("/employees");
+  revalidatePath("/monthly-performance");
   revalidatePath("/");
+  redirect("/advances");
 }
 
 export async function saveAdvanceTransaction(formData: FormData) {
@@ -1021,11 +1035,11 @@ export async function deleteAdvanceTransaction(formData: FormData) {
   if (!hasSupabaseEnv()) {
     revalidatePath("/advances");
     revalidatePath("/");
-    return;
+    redirect("/advances");
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("advance_transactions").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("advance_transactions").select("*").eq("id", id).maybeSingle();
   const { error } = await supabase.from("advance_transactions").delete().eq("id", id);
 
   if (error) {
@@ -1034,7 +1048,10 @@ export async function deleteAdvanceTransaction(formData: FormData) {
 
   await logActivity("advance_transaction_deleted", "advance_transactions", id, oldData, null);
   revalidatePath("/advances");
+  revalidatePath("/employees");
+  revalidatePath("/monthly-performance");
   revalidatePath("/");
+  redirect("/advances");
 }
 
 export async function saveExpense(formData: FormData) {
