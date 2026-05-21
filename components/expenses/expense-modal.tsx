@@ -14,11 +14,21 @@ import type { Profile, Settings } from "@/lib/types";
 export function ExpenseModal({
   employees,
   currentProfile,
-  categories
+  categories,
+  buttonLabel = "Add expense",
+  modalTitle = "Add expense",
+  modalDescription = "Record a business expense with payer and date.",
+  defaultCategory = "other",
+  categoryLabel = "Category"
 }: {
   employees: Profile[];
   currentProfile: Profile;
   categories: Settings["expense_categories"];
+  buttonLabel?: string;
+  modalTitle?: string;
+  modalDescription?: string;
+  defaultCategory?: string;
+  categoryLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -38,7 +48,7 @@ export function ExpenseModal({
     <>
       <Button type="button" onClick={() => setOpen(true)}>
         <Plus className="h-4 w-4" />
-        Add expense
+        {buttonLabel}
       </Button>
 
       {open ? (
@@ -46,8 +56,8 @@ export function ExpenseModal({
           <div className="max-h-[92vh] w-full overflow-hidden rounded-t-lg border bg-card shadow-2xl sm:max-w-2xl sm:rounded-lg">
             <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
               <div>
-                <h2 className="text-lg font-semibold">Add expense</h2>
-                <p className="text-sm text-muted-foreground">Record a business expense with payer and date.</p>
+                <h2 className="text-lg font-semibold">{modalTitle}</h2>
+                <p className="text-sm text-muted-foreground">{modalDescription}</p>
               </div>
               <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close">
                 <X className="h-4 w-4" />
@@ -71,8 +81,8 @@ export function ExpenseModal({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="expense_category">Category</Label>
-                <Select id="expense_category" name="category" defaultValue="other">
+                <Label htmlFor="expense_category">{categoryLabel}</Label>
+                <Select id="expense_category" name="category" defaultValue={defaultCategory}>
                   {categories.map((category) => (
                     <option key={category} value={category}>
                       {category.replaceAll("_", " ")}

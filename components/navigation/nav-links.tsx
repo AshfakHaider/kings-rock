@@ -12,6 +12,7 @@ import {
   Menu,
   ReceiptText,
   Settings,
+  ShieldAlert,
   ShoppingCart,
   Trophy,
   Users,
@@ -33,6 +34,7 @@ const navItems = [
   { href: "/employees", label: "Employees", icon: Users },
   { href: "/advances", label: "Funds", icon: Banknote },
   { href: "/expenses", label: "Expenses", icon: ReceiptText },
+  { href: "/losses", label: "Losses", icon: ShieldAlert },
   { href: "/reports", label: "Reports", icon: ChartNoAxesCombined, managerOnly: true },
   { href: "/settings", label: "Settings", icon: Settings }
 ];

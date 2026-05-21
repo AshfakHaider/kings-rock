@@ -1059,6 +1059,9 @@ export async function saveExpense(formData: FormData) {
     });
 
     revalidatePath("/expenses");
+    revalidatePath("/losses");
+    revalidatePath("/reports");
+    revalidatePath("/monthly-performance");
     revalidatePath("/");
     return;
   }
@@ -1075,8 +1078,14 @@ export async function saveExpense(formData: FormData) {
   const result = id
     ? await supabase.from("expenses").update(payload).eq("id", id).select().single()
     : await supabase.from("expenses").insert(payload).select().single();
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
   await logActivity(id ? "expense_edited" : "expense_added", "expenses", id, null, result.data);
   revalidatePath("/expenses");
+  revalidatePath("/losses");
+  revalidatePath("/reports");
+  revalidatePath("/monthly-performance");
   revalidatePath("/");
 }
 

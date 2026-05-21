@@ -5,6 +5,8 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { getCurrentProfile, getExpenses, getProfiles, getSettings } from "@/lib/data";
 import { formatDate, money } from "@/lib/utils";
 
+const lossCategories = new Set(["scam_account", "refund_account"]);
+
 export default async function ExpensesPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, allExpenses, profiles, currentProfile] = await Promise.all([
@@ -13,10 +15,11 @@ export default async function ExpensesPage({ searchParams }: { searchParams?: Pr
     getProfiles(),
     getCurrentProfile()
   ]);
-  const expenses =
+  const visibleExpenses =
     currentProfile.role === "employee"
       ? allExpenses.filter((expense) => expense.paid_by === currentProfile.id)
       : allExpenses;
+  const expenses = visibleExpenses.filter((expense) => !lossCategories.has(expense.category));
   const total = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const employees = profiles.filter((profile) => profile.status === "active");
 
