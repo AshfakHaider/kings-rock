@@ -26,7 +26,7 @@ import {
   getSoldAccounts,
   getStockAccounts
 } from "@/lib/data";
-import { getAdvanceBalance, getProfit } from "@/lib/metrics";
+import { getAdvanceBalance, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -64,22 +64,23 @@ export default async function EmployeeDetailPage({
     (account) => account.assigned_employee_id === employee.id && account.status !== "sold"
   );
   const sales = soldAccounts.filter((sale) => sale.employee_id === employee.id);
+  const paidSales = sales.filter(isPaidSale);
   const employeeAdvances = advances.filter((advance) => advance.employee_id === employee.id);
   const employeeAdvanceTransactions = advanceTransactions.filter(
     (transaction) => transaction.employee_id === employee.id
   );
 
-  const salesAmount = sales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
-  const buyingCost = sales.reduce(
+  const salesAmount = paidSales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
+  const buyingCost = paidSales.reduce(
     (total, sale) => total + Number(sale.stock_account?.buying_price ?? 0),
     0
   );
-  const profit = sales.reduce((total, sale) => total + getProfit(sale), 0);
+  const profit = paidSales.reduce((total, sale) => total + getProfit(sale), 0);
   const advanceBalance = getAdvanceBalance(employeeAdvanceTransactions);
   const now = new Date();
-  const monthlyProfit = sales
+  const monthlyProfit = paidSales
     .filter((sale) => {
-      const soldDate = new Date(sale.sold_date);
+      const soldDate = new Date(saleCashDate(sale));
       return soldDate.getMonth() === now.getMonth() && soldDate.getFullYear() === now.getFullYear();
     })
     .reduce((total, sale) => total + getProfit(sale), 0);
@@ -105,8 +106,8 @@ export default async function EmployeeDetailPage({
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Assigned accounts" value={String(assignedAccounts.length)} icon={Boxes} />
-        <StatCard title="Sold accounts" value={String(sales.length)} icon={ShoppingCart} />
-        <StatCard title="Total sales" value={money(salesAmount, settings.currency)} icon={Banknote} tone="good" />
+        <StatCard title="Paid sold accounts" value={String(paidSales.length)} icon={ShoppingCart} />
+        <StatCard title="Received sales" value={money(salesAmount, settings.currency)} icon={Banknote} tone="good" />
         {canViewFinancials ? (
           <>
             <StatCard title="Total profit" value={money(profit, settings.currency)} icon={TrendingUp} tone="good" />
@@ -167,7 +168,7 @@ export default async function EmployeeDetailPage({
             <div className="rounded-md border p-3">
               <p className="text-xs uppercase text-muted-foreground">Average sale</p>
               <p className="mt-1 text-lg font-semibold">
-                {money(sales.length ? salesAmount / sales.length : 0, settings.currency)}
+                {money(paidSales.length ? salesAmount / paidSales.length : 0, settings.currency)}
               </p>
             </div>
             {canViewFinancials ? (
@@ -175,7 +176,7 @@ export default async function EmployeeDetailPage({
                 <div className="rounded-md border p-3">
                   <p className="text-xs uppercase text-muted-foreground">Average profit</p>
                   <p className="mt-1 text-lg font-semibold">
-                    {money(sales.length ? profit / sales.length : 0, settings.currency)}
+                    {money(paidSales.length ? profit / paidSales.length : 0, settings.currency)}
                   </p>
                 </div>
                 <div className="rounded-md border p-3">
@@ -258,12 +259,13 @@ export default async function EmployeeDetailPage({
               ...(canViewFinancials
                 ? [
                     { key: "buying", header: "Buying cost", cell: (row: (typeof sales)[number]) => money(row.stock_account?.buying_price ?? 0, settings.currency) } as const,
-                    { key: "profit", header: "Profit", cell: (row: (typeof sales)[number]) => money(getProfit(row), settings.currency) } as const
+                    { key: "profit", header: "Profit", cell: (row: (typeof sales)[number]) => isPaidSale(row) ? money(getProfit(row), settings.currency) : "Waiting payment" } as const
                   ]
                 : []),
               { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
               { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
-              { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) }
+              { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
+              { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" }
             ]}
           />
         </CardContent>

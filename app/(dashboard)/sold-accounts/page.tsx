@@ -1,10 +1,11 @@
-import { deleteSale } from "@/app/actions";
+import { deleteSale, markSalePaid } from "@/app/actions";
 import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
+import { Button } from "@/components/ui/button";
 import { getCurrentProfile, getSettings, getSoldAccounts } from "@/lib/data";
-import { getProfit, salesBySource } from "@/lib/metrics";
+import { getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
     currentProfile.role === "employee"
       ? allSoldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
       : allSoldAccounts;
+  const waitingSoldAccounts = soldAccounts.filter((sale) => !isPaidSale(sale));
   const sourceRows = salesBySource(soldAccounts);
   type SoldRow = (typeof soldAccounts)[number];
 
@@ -30,14 +32,51 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
         title="Sold Accounts"
         description={
           canViewProfit
-            ? "Complete sold account history with sale amount, source, date, and profit."
+            ? "Complete sold account history. Profit counts only after payment is marked paid."
             : "Your sold account history with sale amount, source, and date."
         }
       />
       <section className="space-y-3">
         <div>
-          <h2 className="text-lg font-semibold">Sales by source</h2>
-          <p className="text-sm text-muted-foreground">See how many accounts each source has sold.</p>
+          <h2 className="text-lg font-semibold">Waiting For Payment</h2>
+          <p className="text-sm text-muted-foreground">Sold accounts waiting for platform payout.</p>
+        </div>
+        <ResponsiveTable
+          rows={waitingSoldAccounts}
+          searchPlaceholder="Search waiting payments..."
+          emptyTitle="No waiting payments"
+          emptyDescription="Newly sold accounts will appear here until payment is received."
+          columns={[
+            {
+              key: "account",
+              header: "Account",
+              cell: (row) => stockDisplayTitle(row.stock_account?.secret_code, row.stock_account?.account_title ?? row.stock_account_id),
+              searchValue: (row) => `${row.stock_account?.secret_code ?? ""} ${row.stock_account?.account_title ?? ""}`
+            },
+            { key: "employee", header: "Sold by", cell: (row) => row.employee?.name ?? row.employee_id, searchValue: (row) => row.employee?.name ?? row.employee_id },
+            { key: "amount", header: "Amount", cell: (row) => money(row.sold_amount, settings.currency) },
+            { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
+            { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
+            ...(canManageSales
+              ? [{
+                  key: "action",
+                  header: "Action",
+                  cell: (row: SoldRow) => (
+                    <form action={markSalePaid}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <Button size="sm">Mark paid</Button>
+                    </form>
+                  )
+                } as const]
+              : [])
+          ]}
+        />
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold">Paid Sales by Source</h2>
+          <p className="text-sm text-muted-foreground">Only paid sales are included in these totals.</p>
         </div>
         <ResponsiveTable
           rows={sourceRows}
@@ -86,20 +125,29 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
           },
           { key: "amount", header: "Sold amount", cell: (row) => money(row.sold_amount, settings.currency) },
           ...(canViewProfit
-            ? [{ key: "profit", header: "Profit", cell: (row: SoldRow) => money(getProfit(row), settings.currency) } as const]
+            ? [{ key: "profit", header: "Profit", cell: (row: SoldRow) => isPaidSale(row) ? money(getProfit(row), settings.currency) : "Waiting payment" } as const]
             : []),
           { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
           { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
           { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
+          { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" },
           ...(canManageSales
             ? [{
                 key: "actions",
                 header: "Actions",
                 cell: (row: SoldRow) => (
-                  <form action={deleteSale}>
-                    <input type="hidden" name="id" value={row.id} />
-                    <DeleteButton label="Delete" />
-                  </form>
+                  <div className="flex flex-wrap gap-2">
+                    {!isPaidSale(row) ? (
+                      <form action={markSalePaid}>
+                        <input type="hidden" name="id" value={row.id} />
+                        <Button size="sm">Mark paid</Button>
+                      </form>
+                    ) : null}
+                    <form action={deleteSale}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <DeleteButton label="Delete" />
+                    </form>
+                  </div>
                 )
               } as const]
             : [])

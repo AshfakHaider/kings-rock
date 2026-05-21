@@ -106,6 +106,8 @@ function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnaps
       totalStockBuyingValue: Number(snapshot.metrics.totalStockBuyingValue ?? 0),
       totalSoldAccounts: Number(snapshot.metrics.totalSoldAccounts ?? 0),
       totalSalesAmount: Number(snapshot.metrics.totalSalesAmount ?? 0),
+      waitingPaymentCount: Number(snapshot.metrics.waitingPaymentCount ?? 0),
+      waitingPaymentAmount: Number(snapshot.metrics.waitingPaymentAmount ?? 0),
       totalBuyingCost: Number(snapshot.metrics.totalBuyingCost ?? 0),
       totalGrossProfit: Number(snapshot.metrics.totalGrossProfit ?? 0),
       totalExpenses: Number(snapshot.metrics.totalExpenses ?? 0),
@@ -303,6 +305,7 @@ export async function getMonthlyLeaderboard(year: number, month: number): Promis
         const employeeSales = soldAccounts.filter((sale) => {
           const soldDate = new Date(sale.sold_date);
           return (
+            sale.payment_status === "paid" &&
             sale.employee_id === profile.id &&
             soldDate.getFullYear() === year &&
             soldDate.getMonth() + 1 === month

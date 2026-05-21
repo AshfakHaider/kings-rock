@@ -78,8 +78,9 @@ create table public.sold_accounts (
   sold_amount numeric(12, 2) not null check (sold_amount >= 0),
   sold_source_website text,
   buyer_contact text,
-  payment_status payment_status not null default 'paid',
+  payment_status payment_status not null default 'pending',
   payment_method text,
+  payment_received_date date,
   sold_date date not null default current_date,
   notes text,
   created_at timestamptz not null default now()
@@ -617,10 +618,11 @@ begin
       sa.employee_id,
       count(sa.id) as sold_count,
       coalesce(sum(sa.sold_amount), 0) as total_sales,
-      max(sa.sold_date) as last_sale
+      max(coalesce(sa.payment_received_date, sa.sold_date)) as last_sale
     from public.sold_accounts sa
-    where extract(year from sa.sold_date)::int = p_year
-      and extract(month from sa.sold_date)::int = p_month
+    where extract(year from coalesce(sa.payment_received_date, sa.sold_date))::int = p_year
+      and extract(month from coalesce(sa.payment_received_date, sa.sold_date))::int = p_month
+      and sa.payment_status = 'paid'
     group by sa.employee_id
   ),
   monthly_tasks as (
@@ -749,6 +751,16 @@ as $$
     where ctx.role in ('admin', 'manager')
        or so.employee_id = ctx.profile_id
   ),
+  paid_sales as (
+    select *
+    from visible_sales
+    where payment_status = 'paid'
+  ),
+  waiting_sales as (
+    select *
+    from visible_sales
+    where payment_status <> 'paid'
+  ),
   visible_expenses as (
     select e.*
     from public.expenses e, ctx
@@ -766,7 +778,7 @@ as $$
       so.*,
       coalesce(sa.buying_price, 0) as buying_price,
       coalesce(p.name, 'Unknown') as employee_name
-    from visible_sales so
+    from paid_sales so
     left join public.stock_accounts sa on sa.id = so.stock_account_id
     left join public.profiles p on p.id = so.employee_id
   ),
@@ -774,20 +786,22 @@ as $$
     select
       (select count(*) from visible_stock) as total_stock_accounts,
       coalesce((select sum(buying_price) from visible_stock), 0) as total_stock_buying_value,
-      (select count(*) from visible_sales) as total_sold_accounts,
-      coalesce((select sum(sold_amount) from visible_sales), 0) as total_sales_amount,
+      (select count(*) from paid_sales) as total_sold_accounts,
+      coalesce((select sum(sold_amount) from paid_sales), 0) as total_sales_amount,
+      (select count(*) from waiting_sales) as waiting_payment_count,
+      coalesce((select sum(sold_amount) from waiting_sales), 0) as waiting_payment_amount,
       coalesce((select sum(buying_price) from sales_with_cost), 0) as total_buying_cost,
       coalesce((select sum(amount) from visible_expenses), 0) as total_expenses,
       coalesce((
         select sum(sold_amount - buying_price)
         from sales_with_cost
-        where extract(month from sold_date) = extract(month from current_date)
-          and extract(year from sold_date) = extract(year from current_date)
+        where extract(month from coalesce(payment_received_date, sold_date)) = extract(month from current_date)
+          and extract(year from coalesce(payment_received_date, sold_date)) = extract(year from current_date)
       ), 0) as monthly_profit,
       coalesce((
         select sum(sold_amount - buying_price)
         from sales_with_cost
-        where extract(year from sold_date) = extract(year from current_date)
+        where extract(year from coalesce(payment_received_date, sold_date)) = extract(year from current_date)
       ), 0) as yearly_profit,
       (select count(*) from public.gmail_inventory where status = 'fresh') as available_gmail_count,
       (select count(*) from public.gmail_inventory where status = 'used') as used_gmail_count,
@@ -806,14 +820,14 @@ as $$
     select coalesce(jsonb_agg(item order by sort_month), '[]'::jsonb) as data
     from (
       select
-        date_trunc('month', sold_date) as sort_month,
+        date_trunc('month', coalesce(payment_received_date, sold_date)) as sort_month,
         jsonb_build_object(
-          'month', to_char(date_trunc('month', sold_date), 'Mon'),
+          'month', to_char(date_trunc('month', coalesce(payment_received_date, sold_date)), 'Mon'),
           'sales', coalesce(sum(sold_amount), 0),
           'profit', coalesce(sum(sold_amount - buying_price), 0)
         ) as item
       from sales_with_cost
-      group by date_trunc('month', sold_date)
+      group by date_trunc('month', coalesce(payment_received_date, sold_date))
     ) months
   ),
   employee_profit_series as (
@@ -851,6 +865,8 @@ as $$
       'totalStockBuyingValue', base_numbers.total_stock_buying_value,
       'totalSoldAccounts', base_numbers.total_sold_accounts,
       'totalSalesAmount', base_numbers.total_sales_amount,
+      'waitingPaymentCount', base_numbers.waiting_payment_count,
+      'waitingPaymentAmount', base_numbers.waiting_payment_amount,
       'totalBuyingCost', base_numbers.total_buying_cost,
       'totalGrossProfit', base_numbers.total_sales_amount - base_numbers.total_buying_cost,
       'totalExpenses', base_numbers.total_expenses,

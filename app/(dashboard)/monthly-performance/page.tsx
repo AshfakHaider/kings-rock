@@ -24,7 +24,7 @@ import {
   getSoldAccounts,
   getStockAccounts
 } from "@/lib/data";
-import { getAdvanceBalance, getProfit } from "@/lib/metrics";
+import { getAdvanceBalance, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
 import { formatDate, money } from "@/lib/utils";
 
 const monthNames = [
@@ -98,7 +98,10 @@ export default async function MonthlyPerformancePage({
         (account) => account.assigned_employee_id === employee.id && account.status !== "sold"
       );
       const monthlySales = soldAccounts.filter(
-        (sale) => sale.employee_id === employee.id && inSelectedMonth(sale.sold_date, selectedYear, selectedMonth)
+        (sale) =>
+          isPaidSale(sale) &&
+          sale.employee_id === employee.id &&
+          inSelectedMonth(saleCashDate(sale), selectedYear, selectedMonth)
       );
       const employeeExpenses = expenses.filter(
         (expense) => expense.paid_by === employee.id && inSelectedMonth(expense.expense_date, selectedYear, selectedMonth)
@@ -118,7 +121,7 @@ export default async function MonthlyPerformancePage({
       const profit = monthlySales.reduce((total, sale) => total + getProfit(sale), 0);
       const expenseAmount = employeeExpenses.reduce((total, expense) => total + Number(expense.amount), 0);
       const lastSale = monthlySales
-        .map((sale) => sale.sold_date)
+        .map((sale) => saleCashDate(sale))
         .sort()
         .at(-1) ?? null;
 

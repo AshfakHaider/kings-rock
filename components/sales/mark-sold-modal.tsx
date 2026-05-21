@@ -53,7 +53,7 @@ export function MarkSoldModal({
 
             <form action={submit} className="space-y-4 p-4">
               <input type="hidden" name="stock_account_id" value={account.id} />
-              <input type="hidden" name="payment_status" value="paid" />
+              <input type="hidden" name="payment_status" value="pending" />
 
               <div className="space-y-2">
                 <Label htmlFor={`sold_amount_${account.id}`}>Selling amount</Label>
@@ -109,7 +109,7 @@ export function MarkSoldModal({
                 <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button disabled={pending}>{pending ? "Saving..." : "Confirm sold"}</Button>
+                <Button disabled={pending}>{pending ? "Saving..." : "Move to waiting payment"}</Button>
               </div>
             </form>
           </div>

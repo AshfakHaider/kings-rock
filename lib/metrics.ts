@@ -10,6 +10,18 @@ export function getProfit(sale: SoldAccount) {
   return Number(sale.sold_amount) - Number(sale.stock_account?.buying_price ?? 0);
 }
 
+export function isPaidSale(sale: SoldAccount) {
+  return sale.payment_status === "paid";
+}
+
+export function paidSales(sales: SoldAccount[]) {
+  return sales.filter(isPaidSale);
+}
+
+export function saleCashDate(sale: SoldAccount) {
+  return sale.payment_received_date ?? sale.sold_date;
+}
+
 export function getAdvanceBalance(transactions: AdvanceTransaction[]) {
   return transactions.reduce((total, transaction) => {
     if (transaction.type === "money_given") return total + Number(transaction.amount);
@@ -30,27 +42,30 @@ export function getDashboardMetrics(input: {
   const now = new Date();
   const thisMonth = now.getMonth();
   const thisYear = now.getFullYear();
+  const receivedSales = paidSales(soldAccounts);
+  const waitingSales = soldAccounts.filter((sale) => !isPaidSale(sale));
 
-  const soldBuyingCost = soldAccounts.reduce(
+  const soldBuyingCost = receivedSales.reduce(
     (total, sale) => total + Number(sale.stock_account?.buying_price ?? 0),
     0
   );
-  const totalSalesAmount = soldAccounts.reduce(
+  const totalSalesAmount = receivedSales.reduce(
     (total, sale) => total + Number(sale.sold_amount),
     0
   );
+  const waitingPaymentAmount = waitingSales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
   const totalExpenses = expenses.reduce((total, expense) => total + Number(expense.amount), 0);
   const grossProfit = totalSalesAmount - soldBuyingCost;
 
-  const monthlyProfit = soldAccounts
+  const monthlyProfit = receivedSales
     .filter((sale) => {
-      const date = new Date(sale.sold_date);
+      const date = new Date(saleCashDate(sale));
       return date.getMonth() === thisMonth && date.getFullYear() === thisYear;
     })
     .reduce((total, sale) => total + getProfit(sale), 0);
 
-  const yearlyProfit = soldAccounts
-    .filter((sale) => new Date(sale.sold_date).getFullYear() === thisYear)
+  const yearlyProfit = receivedSales
+    .filter((sale) => new Date(saleCashDate(sale)).getFullYear() === thisYear)
     .reduce((total, sale) => total + getProfit(sale), 0);
 
   return {
@@ -58,8 +73,10 @@ export function getDashboardMetrics(input: {
     totalStockBuyingValue: stockAccounts
       .filter((account) => account.status !== "sold")
       .reduce((total, account) => total + Number(account.buying_price), 0),
-    totalSoldAccounts: soldAccounts.length,
+    totalSoldAccounts: receivedSales.length,
     totalSalesAmount,
+    waitingPaymentCount: waitingSales.length,
+    waitingPaymentAmount,
     totalBuyingCost: soldBuyingCost,
     totalGrossProfit: grossProfit,
     totalExpenses,
@@ -75,8 +92,8 @@ export function getDashboardMetrics(input: {
 export function monthlySeries(sales: SoldAccount[]) {
   const buckets = new Map<string, { month: string; sales: number; profit: number }>();
 
-  for (const sale of sales) {
-    const date = new Date(sale.sold_date);
+  for (const sale of paidSales(sales)) {
+    const date = new Date(saleCashDate(sale));
     const month = date.toLocaleString("en", { month: "short" });
     const item = buckets.get(month) ?? { month, sales: 0, profit: 0 };
     item.sales += Number(sale.sold_amount);
@@ -89,7 +106,7 @@ export function monthlySeries(sales: SoldAccount[]) {
 
 export function employeeProfitSeries(sales: SoldAccount[]) {
   const buckets = new Map<string, { name: string; profit: number; sales: number }>();
-  for (const sale of sales) {
+  for (const sale of paidSales(sales)) {
     const name = sale.employee?.name ?? "Unknown";
     const item = buckets.get(name) ?? { name, profit: 0, sales: 0 };
     item.profit += getProfit(sale);
@@ -102,7 +119,7 @@ export function employeeProfitSeries(sales: SoldAccount[]) {
 export function salesBySource(sales: SoldAccount[]) {
   const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
 
-  for (const sale of sales) {
+  for (const sale of paidSales(sales)) {
     const source = sale.sold_source_website?.trim() || "Unknown";
     const item = buckets.get(source.toLowerCase()) ?? {
       source,

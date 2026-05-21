@@ -150,9 +150,9 @@ export function SaleForm({
       <Field label="Sold date" name="sold_date" type="date" required />
       <div className="space-y-2">
         <Label>Payment status</Label>
-        <Select name="payment_status" defaultValue="paid">
-          {["paid", "pending", "partial"].map((status) => (
-            <option key={status} value={status}>{status}</option>
+        <Select name="payment_status" defaultValue="pending">
+          {["pending", "paid", "partial"].map((status) => (
+            <option key={status} value={status}>{status === "pending" ? "waiting payment" : status}</option>
           ))}
         </Select>
       </div>

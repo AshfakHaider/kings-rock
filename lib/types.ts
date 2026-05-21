@@ -62,6 +62,7 @@ export type SoldAccount = {
   buyer_contact?: string | null;
   payment_status: PaymentStatus;
   payment_method?: string | null;
+  payment_received_date?: string | null;
   sold_date: string;
   notes?: string | null;
   created_at: string;
@@ -192,6 +193,8 @@ export type DashboardSnapshot = {
     totalStockBuyingValue: number;
     totalSoldAccounts: number;
     totalSalesAmount: number;
+    waitingPaymentCount: number;
+    waitingPaymentAmount: number;
     totalBuyingCost: number;
     totalGrossProfit: number;
     totalExpenses: number;

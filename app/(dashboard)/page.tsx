@@ -2,6 +2,7 @@ import {
   Banknote,
   Boxes,
   ChartNoAxesCombined,
+  Clock3,
   Mail,
   ReceiptText,
   ShoppingCart,
@@ -12,15 +13,23 @@ import { BarMetricChart } from "@/components/modules/charts";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatCard } from "@/components/modules/stat-card";
-import { getDashboardSnapshot, getSoldAccounts } from "@/lib/data";
-import { salesBySource } from "@/lib/metrics";
-import { money } from "@/lib/utils";
+import { getCurrentProfile, getDashboardSnapshot, getSoldAccounts } from "@/lib/data";
+import { isPaidSale, salesBySource } from "@/lib/metrics";
+import { formatDate, money } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  const [snapshot, soldAccounts] = await Promise.all([getDashboardSnapshot(), getSoldAccounts()]);
+  const [snapshot, soldAccounts, currentProfile] = await Promise.all([
+    getDashboardSnapshot(),
+    getSoldAccounts(),
+    getCurrentProfile()
+  ]);
   const canViewFinancials = snapshot.role !== "employee";
   const metrics = snapshot.metrics;
   const sourceRows = canViewFinancials ? salesBySource(soldAccounts).slice(0, 5) : [];
+  const waitingPayments = soldAccounts
+    .filter((sale) => !isPaidSale(sale))
+    .filter((sale) => currentProfile.role !== "employee" || sale.employee_id === currentProfile.id)
+    .slice(0, 8);
 
   return (
     <>
@@ -42,12 +51,24 @@ export default async function DashboardPage() {
             icon={Wallet}
           />
         ) : null}
-        <StatCard title="Sold accounts" value={String(metrics.totalSoldAccounts)} icon={ShoppingCart} />
+        <StatCard title="Paid sold accounts" value={String(metrics.totalSoldAccounts)} icon={ShoppingCart} />
         <StatCard
-          title="Sales amount"
+          title="Received sales"
           value={money(metrics.totalSalesAmount, snapshot.currency)}
           icon={Banknote}
           tone="good"
+        />
+        <StatCard
+          title="Waiting payments"
+          value={String(metrics.waitingPaymentCount)}
+          icon={Clock3}
+          tone="warn"
+        />
+        <StatCard
+          title="Waiting amount"
+          value={money(metrics.waitingPaymentAmount, snapshot.currency)}
+          icon={Banknote}
+          tone="warn"
         />
         {canViewFinancials ? (
           <>
@@ -95,6 +116,38 @@ export default async function DashboardPage() {
           title="Employee advance balance"
           value={money(metrics.employeeAdvanceBalance, snapshot.currency)}
           icon={Banknote}
+        />
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold">Waiting For Payment</h2>
+          <p className="text-sm text-muted-foreground">
+            These accounts are sold, but the platform payment has not been received yet.
+          </p>
+        </div>
+        <ResponsiveTable
+          rows={waitingPayments}
+          searchPlaceholder="Search waiting payments..."
+          emptyTitle="No waiting payments"
+          emptyDescription="When a sold account is waiting for platform payout, it will appear here."
+          columns={[
+            {
+              key: "account",
+              header: "Account",
+              cell: (row) => row.stock_account?.account_title ?? row.stock_account_id,
+              searchValue: (row) => `${row.stock_account?.secret_code ?? ""} ${row.stock_account?.account_title ?? ""}`
+            },
+            {
+              key: "employee",
+              header: "Sold by",
+              cell: (row) => row.employee?.name ?? row.employee_id,
+              searchValue: (row) => row.employee?.name ?? row.employee_id
+            },
+            { key: "amount", header: "Amount", cell: (row) => money(row.sold_amount, snapshot.currency) },
+            { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
+            { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) }
+          ]}
         />
       </section>
 

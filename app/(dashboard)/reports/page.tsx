@@ -12,7 +12,7 @@ import {
   getSoldAccounts,
   getStockAccounts
 } from "@/lib/data";
-import { getAdvanceBalance, getProfit, salesBySource } from "@/lib/metrics";
+import { getAdvanceBalance, getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function ReportsPage({
@@ -45,6 +45,7 @@ export default async function ReportsPage({
     if (params.to && sale.sold_date > params.to) return false;
     return true;
   });
+  const paidSales = sales.filter(isPaidSale);
 
   const csvRows = sales.map((sale) => ({
     account: sale.stock_account?.account_title,
@@ -54,20 +55,22 @@ export default async function ReportsPage({
     ...(canViewFinancials
       ? {
           buying_cost: sale.stock_account?.buying_price,
-          profit: getProfit(sale)
+          profit: isPaidSale(sale) ? getProfit(sale) : ""
         }
       : {}),
     source: sale.sold_source_website,
-    sold_date: sale.sold_date
+    payment_status: sale.payment_status,
+    sold_date: sale.sold_date,
+    paid_date: sale.payment_received_date
   }));
 
   const stockValue = stockAccounts
     .filter((account) => !params.status || account.status === params.status)
     .reduce((sum, account) => sum + Number(account.buying_price), 0);
-  const grossProfit = sales.reduce((sum, sale) => sum + getProfit(sale), 0);
+  const grossProfit = paidSales.reduce((sum, sale) => sum + getProfit(sale), 0);
   const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const visibleAdvanceTransactions = advanceTransactions;
-  const sourceRows = salesBySource(sales);
+  const sourceRows = salesBySource(paidSales);
   type SaleRow = (typeof sales)[number];
 
   return (
@@ -115,7 +118,7 @@ export default async function ReportsPage({
       <section className="space-y-3">
         <div>
           <h2 className="text-lg font-semibold">Sales by source</h2>
-          <p className="text-sm text-muted-foreground">Filtered source totals for sold accounts.</p>
+          <p className="text-sm text-muted-foreground">Filtered source totals for paid sales only.</p>
         </div>
         <ResponsiveTable
           rows={sourceRows}
@@ -139,10 +142,12 @@ export default async function ReportsPage({
           { key: "employee", header: "Employee", cell: (row) => row.employee?.name ?? "-" },
           { key: "amount", header: "Sold", cell: (row) => money(row.sold_amount, settings.currency) },
           ...(canViewFinancials
-            ? [{ key: "profit", header: "Profit", cell: (row: SaleRow) => money(getProfit(row), settings.currency) } as const]
+            ? [{ key: "profit", header: "Profit", cell: (row: SaleRow) => isPaidSale(row) ? money(getProfit(row), settings.currency) : "Waiting payment" } as const]
             : []),
           { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-" },
-          { key: "date", header: "Date", cell: (row) => formatDate(row.sold_date) }
+          { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
+          { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
+          { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" }
         ]}
       />
 

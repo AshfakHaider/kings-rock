@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 
 export function StatusBadge({ value }: { value: string }) {
   const normalized = value.toLowerCase();
+  const label = normalized === "pending" ? "Waiting payment" : value.replaceAll("_", " ");
   const variant =
     normalized.includes("sold") ||
     normalized.includes("paid") ||
@@ -19,7 +20,7 @@ export function StatusBadge({ value }: { value: string }) {
 
   return (
     <Badge variant={variant} className="capitalize">
-      {value.replaceAll("_", " ")}
+      {label}
     </Badge>
   );
 }

@@ -170,6 +170,23 @@ export async function addDemoSale(sale: SoldAccount) {
   return sale;
 }
 
+export async function upsertDemoSale(sale: SoldAccount) {
+  const stored = await readStoredSoldAccounts();
+  const index = stored.findIndex((item) => item.id === sale.id);
+
+  if (index >= 0) {
+    stored[index] = {
+      ...stored[index],
+      ...sale
+    };
+  } else {
+    stored.unshift(sale);
+  }
+
+  await writeJsonStore(soldStorePath, stored);
+  return sale;
+}
+
 export async function getDemoGmailAccounts() {
   const stored = await readStoredGmailAccounts();
   const storedIds = new Set(stored.map((gmail) => gmail.id));

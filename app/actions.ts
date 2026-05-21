@@ -17,11 +17,13 @@ import {
   getDemoGmailAccounts,
   getDemoExpenses,
   getDemoProfiles,
+  getDemoSoldAccounts,
   getDemoStockAccounts,
   upsertDemoDailyTask,
   upsertDemoExpense,
   upsertDemoProfile,
   upsertDemoGmailAccount,
+  upsertDemoSale,
   upsertDemoStockAccount
 } from "@/lib/demo-store";
 import type { DailyTask, DailyTaskCompletion, Expense, GmailAccount, Profile, SoldAccount, StockAccount } from "@/lib/types";
@@ -537,8 +539,9 @@ export async function saveSale(formData: FormData) {
       sold_amount: number(formData, "sold_amount"),
       sold_source_website: text(formData, "sold_source_website"),
       buyer_contact: null,
-      payment_status: "paid",
+      payment_status: (text(formData, "payment_status") ?? "pending") as SoldAccount["payment_status"],
       payment_method: null,
+      payment_received_date: null,
       sold_date: soldDate,
       notes: text(formData, "notes"),
       created_at: new Date().toISOString(),
@@ -557,6 +560,7 @@ export async function saveSale(formData: FormData) {
     revalidatePath("/sold-accounts");
     revalidatePath("/stock-accounts");
     revalidatePath(`/stock-accounts/${stockAccount.id}`);
+    revalidatePath("/employees");
     revalidatePath("/");
     return;
   }
@@ -570,8 +574,9 @@ export async function saveSale(formData: FormData) {
     sold_amount: number(formData, "sold_amount"),
     sold_source_website: text(formData, "sold_source_website"),
     buyer_contact: text(formData, "buyer_contact"),
-    payment_status: text(formData, "payment_status") ?? "paid",
+    payment_status: text(formData, "payment_status") ?? "pending",
     payment_method: text(formData, "payment_method"),
+    payment_received_date: text(formData, "payment_status") === "paid" ? text(formData, "payment_received_date") ?? new Date().toISOString().slice(0, 10) : null,
     sold_date: text(formData, "sold_date"),
     notes: text(formData, "notes")
   };
@@ -583,10 +588,74 @@ export async function saveSale(formData: FormData) {
     ? await supabase.from("sold_accounts").update(payload).eq("id", id).select().single()
     : await supabase.from("sold_accounts").insert(payload).select().single();
 
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
   await logActivity(id ? "sale_edited" : "account_sold", "sold_accounts", id, oldData, result.data);
+  revalidatePath("/sales");
   revalidatePath("/sold-accounts");
   revalidatePath("/stock-accounts");
+  revalidatePath("/employees");
   revalidatePath("/");
+}
+
+export async function markSalePaid(formData: FormData) {
+  const profile = await getCurrentProfile();
+  const id = String(formData.get("id") ?? "");
+  const paymentMethod = text(formData, "payment_method");
+  const paidNote = text(formData, "notes");
+
+  if (profile.role === "employee") {
+    throw new Error("Employees cannot mark payments as paid.");
+  }
+
+  if (!hasSupabaseEnv()) {
+    const sale = (await getDemoSoldAccounts()).find((item) => item.id === id);
+    if (sale) {
+      await upsertDemoSale({
+        ...sale,
+        payment_status: "paid",
+        payment_method: paymentMethod ?? sale.payment_method ?? null,
+        payment_received_date: new Date().toISOString().slice(0, 10),
+        notes: paidNote ?? sale.notes ?? null
+      });
+    }
+
+    revalidatePath("/sold-accounts");
+    revalidatePath("/");
+    revalidatePath("/reports");
+    revalidatePath("/monthly-performance");
+    revalidatePath("/leaderboard");
+    revalidatePath("/employees");
+    return;
+  }
+
+  const supabase = await createClient();
+  const { data: oldData } = await supabase.from("sold_accounts").select("*").eq("id", id).single();
+  const { data, error } = await supabase
+    .from("sold_accounts")
+    .update({
+      payment_status: "paid",
+      payment_method: paymentMethod ?? oldData?.payment_method ?? null,
+      payment_received_date: new Date().toISOString().slice(0, 10),
+      notes: paidNote ?? oldData?.notes ?? null
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await logActivity("sale_payment_marked_paid", "sold_accounts", id, oldData, data);
+  revalidatePath("/sold-accounts");
+  revalidatePath("/");
+  revalidatePath("/reports");
+  revalidatePath("/monthly-performance");
+  revalidatePath("/leaderboard");
+  revalidatePath("/employees");
 }
 
 export async function deleteSale(formData: FormData) {
