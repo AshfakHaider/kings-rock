@@ -1,4 +1,6 @@
+import { deleteExpense } from "@/app/actions";
 import { ExpenseModal } from "@/components/expenses/expense-modal";
+import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
@@ -22,6 +24,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams?: Pr
   const expenses = visibleExpenses.filter((expense) => !lossCategories.has(expense.category));
   const total = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const employees = profiles.filter((profile) => profile.status === "active");
+  const expenseCategories = settings.expense_categories.filter((category) => !lossCategories.has(category));
+  const canManageExpenses = currentProfile.role !== "employee";
 
   return (
     <>
@@ -36,7 +40,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams?: Pr
           <ExpenseModal
             employees={employees}
             currentProfile={currentProfile}
-            categories={settings.expense_categories}
+            categories={expenseCategories}
           />
         }
       />
@@ -50,7 +54,32 @@ export default async function ExpensesPage({ searchParams }: { searchParams?: Pr
           { key: "amount", header: "Amount", cell: (row) => money(row.amount, settings.currency) },
           { key: "date", header: "Date", cell: (row) => formatDate(row.expense_date) },
           { key: "paid", header: "Paid by", cell: (row) => row.payer?.name ?? row.paid_by ?? "-", searchValue: (row) => row.payer?.name ?? row.paid_by ?? "" },
-          { key: "notes", header: "Notes", cell: (row) => row.notes ?? "-", searchValue: (row) => row.notes ?? "" }
+          { key: "notes", header: "Notes", cell: (row) => row.notes ?? "-", searchValue: (row) => row.notes ?? "" },
+          ...(canManageExpenses
+            ? [{
+                key: "actions",
+                header: "Actions",
+                cell: (row: (typeof expenses)[number]) => (
+                  <div className="flex flex-wrap gap-2">
+                    <ExpenseModal
+                      employees={employees}
+                      currentProfile={currentProfile}
+                      categories={expenseCategories}
+                      expense={row}
+                      trigger="icon"
+                      buttonLabel="Edit expense"
+                      modalTitle="Edit expense"
+                      modalDescription="Update this business expense."
+                      defaultCategory={row.category}
+                    />
+                    <form action={deleteExpense}>
+                      <input type="hidden" name="id" value={row.id} />
+                      <DeleteButton label="Delete expense" iconOnly />
+                    </form>
+                  </div>
+                )
+              } as const]
+            : [])
         ]}
       />
     </>
