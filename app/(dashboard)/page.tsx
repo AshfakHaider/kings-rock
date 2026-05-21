@@ -51,6 +51,12 @@ export default async function DashboardPage() {
             icon={Wallet}
           />
         ) : null}
+        <StatCard
+          title="Stock selling value"
+          value={money(metrics.totalStockSellingValue, snapshot.currency)}
+          icon={Banknote}
+          tone="good"
+        />
         <StatCard title="Paid sold accounts" value={String(metrics.totalSoldAccounts)} icon={ShoppingCart} />
         <StatCard
           title="Received sales"

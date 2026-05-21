@@ -786,6 +786,7 @@ as $$
     select
       (select count(*) from visible_stock) as total_stock_accounts,
       coalesce((select sum(buying_price) from visible_stock), 0) as total_stock_buying_value,
+      coalesce((select sum(selling_price) from visible_stock), 0) as total_stock_selling_value,
       (select count(*) from paid_sales) as total_sold_accounts,
       coalesce((select sum(sold_amount) from paid_sales), 0) as total_sales_amount,
       (select count(*) from waiting_sales) as waiting_payment_count,
@@ -863,6 +864,7 @@ as $$
     'metrics', jsonb_build_object(
       'totalStockAccounts', base_numbers.total_stock_accounts,
       'totalStockBuyingValue', base_numbers.total_stock_buying_value,
+      'totalStockSellingValue', base_numbers.total_stock_selling_value,
       'totalSoldAccounts', base_numbers.total_sold_accounts,
       'totalSalesAmount', base_numbers.total_sales_amount,
       'waitingPaymentCount', base_numbers.waiting_payment_count,

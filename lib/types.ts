@@ -191,6 +191,7 @@ export type DashboardSnapshot = {
   metrics: {
     totalStockAccounts: number;
     totalStockBuyingValue: number;
+    totalStockSellingValue: number;
     totalSoldAccounts: number;
     totalSalesAmount: number;
     waitingPaymentCount: number;

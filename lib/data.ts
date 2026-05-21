@@ -104,6 +104,7 @@ function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnaps
     metrics: {
       totalStockAccounts: Number(snapshot.metrics.totalStockAccounts ?? 0),
       totalStockBuyingValue: Number(snapshot.metrics.totalStockBuyingValue ?? 0),
+      totalStockSellingValue: Number(snapshot.metrics.totalStockSellingValue ?? 0),
       totalSoldAccounts: Number(snapshot.metrics.totalSoldAccounts ?? 0),
       totalSalesAmount: Number(snapshot.metrics.totalSalesAmount ?? 0),
       waitingPaymentCount: Number(snapshot.metrics.waitingPaymentCount ?? 0),

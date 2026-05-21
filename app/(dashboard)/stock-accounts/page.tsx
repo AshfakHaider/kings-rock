@@ -53,6 +53,9 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
   const stockValue = stockAccounts
     .filter((account) => account.status !== "sold")
     .reduce((total, account) => total + Number(account.buying_price), 0);
+  const stockSellingValue = stockAccounts
+    .filter((account) => account.status !== "sold")
+    .reduce((total, account) => total + Number(account.selling_price ?? 0), 0);
   type StockRow = (typeof visibleStockAccounts)[number];
 
   return (
@@ -61,8 +64,8 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
         title="Stock Accounts"
         description={
           canViewBuyingPrice
-            ? `${totalAvailable} available accounts worth ${money(stockValue, settings.currency)}.`
-            : `${totalAvailable} available accounts.`
+            ? `${totalAvailable} available accounts. Buying value ${money(stockValue, settings.currency)}. Selling value ${money(stockSellingValue, settings.currency)}.`
+            : `${totalAvailable} available accounts. Selling value ${money(stockSellingValue, settings.currency)}.`
         }
         action={
           <StockAccountModal

@@ -73,6 +73,9 @@ export function getDashboardMetrics(input: {
     totalStockBuyingValue: stockAccounts
       .filter((account) => account.status !== "sold")
       .reduce((total, account) => total + Number(account.buying_price), 0),
+    totalStockSellingValue: stockAccounts
+      .filter((account) => account.status !== "sold")
+      .reduce((total, account) => total + Number(account.selling_price ?? 0), 0),
     totalSoldAccounts: receivedSales.length,
     totalSalesAmount,
     waitingPaymentCount: waitingSales.length,
