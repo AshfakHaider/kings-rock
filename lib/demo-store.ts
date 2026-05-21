@@ -240,6 +240,14 @@ export async function upsertDemoExpense(expense: Expense) {
   return normalized;
 }
 
+export async function deleteDemoExpense(id: string) {
+  const stored = await readStoredExpenses();
+  await writeJsonStore(
+    expenseStorePath,
+    stored.filter((expense) => expense.id !== id)
+  );
+}
+
 function demoExpensesWithPayers(profiles: Profile[]) {
   return demoExpenses.map((expense) => ({
     ...expense,

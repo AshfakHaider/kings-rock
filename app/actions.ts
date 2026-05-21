@@ -12,6 +12,7 @@ import {
   addDemoSale,
   addDemoDailyTaskCompletion,
   deleteDemoDailyTask,
+  deleteDemoExpense,
   deleteDemoProfile,
   getDemoDailyTasks,
   getDemoGmailAccounts,
@@ -1082,6 +1083,40 @@ export async function saveExpense(formData: FormData) {
     throw new Error(result.error.message);
   }
   await logActivity(id ? "expense_edited" : "expense_added", "expenses", id, null, result.data);
+  revalidatePath("/expenses");
+  revalidatePath("/losses");
+  revalidatePath("/reports");
+  revalidatePath("/monthly-performance");
+  revalidatePath("/");
+}
+
+export async function deleteExpense(formData: FormData) {
+  const profile = await getCurrentProfile();
+  const id = String(formData.get("id") ?? "");
+
+  if (profile.role === "employee") {
+    throw new Error("Employees cannot delete expenses or losses.");
+  }
+
+  if (!hasSupabaseEnv()) {
+    await deleteDemoExpense(id);
+    revalidatePath("/expenses");
+    revalidatePath("/losses");
+    revalidatePath("/reports");
+    revalidatePath("/monthly-performance");
+    revalidatePath("/");
+    return;
+  }
+
+  const supabase = await createClient();
+  const { data: oldData } = await supabase.from("expenses").select("*").eq("id", id).single();
+  const { error } = await supabase.from("expenses").delete().eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await logActivity("expense_deleted", "expenses", id, oldData, null);
   revalidatePath("/expenses");
   revalidatePath("/losses");
   revalidatePath("/reports");
