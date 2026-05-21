@@ -568,15 +568,18 @@ export async function saveSale(formData: FormData) {
   const supabase = await createClient();
   const profile = await getCurrentProfile();
   const employeeId = profile.role === "employee" ? profile.id : text(formData, "employee_id") ?? profile.id;
+  const paymentStatus = text(formData, "payment_status") ?? "pending";
   const payload = {
     stock_account_id: text(formData, "stock_account_id"),
     employee_id: employeeId,
     sold_amount: number(formData, "sold_amount"),
     sold_source_website: text(formData, "sold_source_website"),
     buyer_contact: text(formData, "buyer_contact"),
-    payment_status: text(formData, "payment_status") ?? "pending",
+    payment_status: paymentStatus,
     payment_method: text(formData, "payment_method"),
-    payment_received_date: text(formData, "payment_status") === "paid" ? text(formData, "payment_received_date") ?? new Date().toISOString().slice(0, 10) : null,
+    ...(paymentStatus === "paid"
+      ? { payment_received_date: text(formData, "payment_received_date") ?? new Date().toISOString().slice(0, 10) }
+      : {}),
     sold_date: text(formData, "sold_date"),
     notes: text(formData, "notes")
   };
@@ -633,7 +636,7 @@ export async function markSalePaid(formData: FormData) {
 
   const supabase = await createClient();
   const { data: oldData } = await supabase.from("sold_accounts").select("*").eq("id", id).single();
-  const { data, error } = await supabase
+  let result = await supabase
     .from("sold_accounts")
     .update({
       payment_status: "paid",
@@ -645,11 +648,27 @@ export async function markSalePaid(formData: FormData) {
     .select()
     .single();
 
-  if (error) {
-    throw new Error(error.message);
+  if (
+    result.error &&
+    (result.error.message.includes("payment_received_date") || result.error.message.includes("schema cache"))
+  ) {
+    result = await supabase
+      .from("sold_accounts")
+      .update({
+        payment_status: "paid",
+        payment_method: paymentMethod ?? oldData?.payment_method ?? null,
+        notes: paidNote ?? oldData?.notes ?? null
+      })
+      .eq("id", id)
+      .select()
+      .single();
   }
 
-  await logActivity("sale_payment_marked_paid", "sold_accounts", id, oldData, data);
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  await logActivity("sale_payment_marked_paid", "sold_accounts", id, oldData, result.data);
   revalidatePath("/sold-accounts");
   revalidatePath("/");
   revalidatePath("/reports");
