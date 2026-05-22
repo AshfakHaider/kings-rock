@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Download, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NoticeToast } from "@/components/ui/notice-toast";
+import { createZipBlob, downloadBlob } from "@/lib/client-zip";
 import { cn } from "@/lib/utils";
 
 function imageExtension(url: string) {
@@ -31,32 +33,35 @@ export function StockImageGallery({
   title: string;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const activeImage = images[activeIndex];
 
   async function downloadAllImages() {
+    if (downloading) return;
     const baseName = filenameSafe(title);
+    setDownloading(true);
+    setNotice(null);
 
-    for (const [index, image] of images.entries()) {
-      const extension = imageExtension(image);
-      const anchor = document.createElement("a");
-      anchor.download = `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`;
-
-      try {
-        const response = await fetch(image);
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        anchor.href = objectUrl;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-      } catch {
-        anchor.href = image;
-        anchor.target = "_blank";
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-      }
+    try {
+      const files = await Promise.all(
+        images.map(async (image, index) => {
+          const response = await fetch(image);
+          if (!response.ok) throw new Error("Image download failed.");
+          const blob = await response.blob();
+          const extension = imageExtension(image);
+          return {
+            name: `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`,
+            blob
+          };
+        })
+      );
+      const zipBlob = await createZipBlob(files);
+      downloadBlob(zipBlob, `${baseName}-images.zip`);
+    } catch {
+      setNotice("Could not download all images. Please try again or download images one by one.");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -75,9 +80,9 @@ export function StockImageGallery({
     <div>
       <div className="flex items-center justify-between gap-3 border-b p-3">
         <p className="text-sm font-medium">Image gallery</p>
-        <Button type="button" size="sm" variant="outline" onClick={downloadAllImages}>
+        <Button type="button" size="sm" variant="outline" onClick={downloadAllImages} disabled={downloading}>
           <Download className="h-4 w-4" />
-          Download all
+          {downloading ? "Preparing..." : "Download all"}
         </Button>
       </div>
 
@@ -112,6 +117,7 @@ export function StockImageGallery({
           ))}
         </div>
       ) : null}
+      <NoticeToast message={notice} onClose={() => setNotice(null)} />
     </div>
   );
 }

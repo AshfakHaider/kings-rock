@@ -188,10 +188,9 @@ function normalizedStockIdentity(value: string | null | undefined) {
 }
 
 function isDuplicateStockAccount(
-  account: Pick<StockAccount, "id" | "status" | "secret_code" | "game_name" | "account_title">,
+  account: Pick<StockAccount, "id" | "status" | "secret_code" | "account_title">,
   currentId: string | null,
   secretCode: string | null,
-  gameName: string,
   accountTitle: string
 ) {
   if (account.id === currentId || account.status === "sold") return false;
@@ -199,12 +198,7 @@ function isDuplicateStockAccount(
   const requestedCode = normalizedStockIdentity(secretCode);
   if (requestedCode && normalizedStockIdentity(account.secret_code) === requestedCode) return true;
 
-  if (requestedCode) return false;
-
-  return (
-    normalizedStockIdentity(account.game_name) === normalizedStockIdentity(gameName) &&
-    normalizedStockIdentity(account.account_title) === normalizedStockIdentity(accountTitle)
-  );
+  return normalizedStockIdentity(account.account_title) === normalizedStockIdentity(accountTitle);
 }
 
 export async function saveStockAccount(formData: FormData) {
@@ -224,7 +218,7 @@ export async function saveStockAccount(formData: FormData) {
     const demoStockAccounts = await getDemoStockAccounts();
     const existing = id ? demoStockAccounts.find((account) => account.id === id) : null;
 
-    if (demoStockAccounts.some((account) => isDuplicateStockAccount(account, id, secretCode, gameName, finalAccountTitle))) {
+    if (demoStockAccounts.some((account) => isDuplicateStockAccount(account, id, secretCode, finalAccountTitle))) {
       throw new Error("Duplicate stock account already exists.");
     }
 
@@ -271,35 +265,30 @@ export async function saveStockAccount(formData: FormData) {
     ? (await supabase.from("stock_accounts").select("buying_price,assigned_employee_id,notes").eq("id", id).single()).data
     : null;
 
-  if (secretCode) {
-    let duplicateCodeQuery = supabase
-      .from("stock_accounts")
-      .select("id")
-      .ilike("secret_code", secretCode)
-      .neq("status", "sold")
-      .limit(1);
+  let duplicateQuery = supabase
+    .from("stock_accounts")
+    .select("id,status,secret_code,account_title")
+    .neq("status", "sold");
 
-    if (id) duplicateCodeQuery = duplicateCodeQuery.neq("id", id);
+  if (id) duplicateQuery = duplicateQuery.neq("id", id);
 
-    const { data: duplicateCode, error: duplicateCodeError } = await duplicateCodeQuery.maybeSingle();
+  const { data: duplicateAccounts, error: duplicateError } = await duplicateQuery;
 
-    if (duplicateCodeError) throw new Error(duplicateCodeError.message);
-    if (duplicateCode) throw new Error("Duplicate stock account already exists with this secret code.");
-  } else {
-    let duplicateTitleQuery = supabase
-      .from("stock_accounts")
-      .select("id")
-      .ilike("game_name", gameName)
-      .ilike("account_title", finalAccountTitle)
-      .neq("status", "sold")
-      .limit(1);
+  if (duplicateError) throw new Error(duplicateError.message);
 
-    if (id) duplicateTitleQuery = duplicateTitleQuery.neq("id", id);
+  const duplicateAccount = (duplicateAccounts as Array<Pick<StockAccount, "id" | "status" | "secret_code" | "account_title">> | null)
+    ?.find((account) => isDuplicateStockAccount(account, id, secretCode, finalAccountTitle));
 
-    const { data: duplicateTitle, error: duplicateTitleError } = await duplicateTitleQuery.maybeSingle();
+  if (duplicateAccount) {
+    const duplicateCode =
+      secretCode &&
+      normalizedStockIdentity(duplicateAccount.secret_code) === normalizedStockIdentity(secretCode);
 
-    if (duplicateTitleError) throw new Error(duplicateTitleError.message);
-    if (duplicateTitle) throw new Error("Duplicate stock account already exists.");
+    throw new Error(
+      duplicateCode
+        ? "Duplicate stock account already exists with this secret code."
+        : "Duplicate stock account already exists with this title."
+    );
   }
 
   const canSavePrivateNotes =

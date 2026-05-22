@@ -11,6 +11,7 @@ import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { compressImageFiles } from "@/lib/client-image-compression";
+import { createZipBlob, downloadBlob } from "@/lib/client-zip";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
 
@@ -61,6 +62,7 @@ export function StockAccountModal({
   const [previewImage, setPreviewImage] = useState<SelectedImage | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [assignedEmployeeId, setAssignedEmployeeId] = useState(stock?.assigned_employee_id ?? "");
+  const [imageDownloadPending, setImageDownloadPending] = useState(false);
   const [pending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
@@ -125,19 +127,28 @@ export function StockAccountModal({
     setImages(nextImages);
   }
 
-  function downloadSelectedImages() {
+  async function downloadSelectedImages() {
+    if (imageDownloadPending) return;
     const title = stockDisplayTitle(stock?.secret_code, stock?.account_title) || "stock-account";
     const baseName = filenameSafe(title);
+    setImageDownloadPending(true);
 
-    selectedImages.forEach((image, index) => {
-      const extension = image.file.name.split(".").pop()?.toLowerCase() || "jpg";
-      const anchor = document.createElement("a");
-      anchor.href = image.url;
-      anchor.download = `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-    });
+    try {
+      const zipBlob = await createZipBlob(
+        selectedImages.map((image, index) => {
+          const extension = image.file.name.split(".").pop()?.toLowerCase() || "jpg";
+          return {
+            name: `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`,
+            blob: image.file
+          };
+        })
+      );
+      downloadBlob(zipBlob, `${baseName}-images.zip`);
+    } catch {
+      setNotice("Could not prepare image download. Please try again.");
+    } finally {
+      setImageDownloadPending(false);
+    }
   }
 
   function submit(formData: FormData) {
@@ -317,9 +328,9 @@ export function StockAccountModal({
                 {selectedImages.length ? (
                   <div className="space-y-2">
                     <div className="flex justify-end">
-                      <Button type="button" size="sm" variant="outline" onClick={downloadSelectedImages}>
+                      <Button type="button" size="sm" variant="outline" onClick={downloadSelectedImages} disabled={imageDownloadPending}>
                         <Download className="h-4 w-4" />
-                        Download all
+                        {imageDownloadPending ? "Preparing..." : "Download all"}
                       </Button>
                     </div>
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
