@@ -98,6 +98,45 @@ function compactSearchTerm(term: string) {
   return term.replace(/\s+/g, "");
 }
 
+function normalizedSearchText(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function searchPieces(term: string) {
+  return Array.from(
+    new Set(
+      term
+        .toLowerCase()
+        .split(/[^a-z0-9]+/i)
+        .flatMap((piece) => piece.split(/(?<=\D)(?=\d)|(?<=\d)(?=\D)/))
+        .map((piece) => piece.trim())
+        .filter((piece) => piece.length >= 2)
+    )
+  );
+}
+
+function stockMatchesSearch(account: StockAccount, term: string) {
+  const plainNeedle = term.toLowerCase();
+  const normalizedNeedle = normalizedSearchText(term);
+  const pieces = searchPieces(term);
+  const haystack = [
+    account.game_name,
+    account.account_title,
+    account.secret_code,
+    account.status,
+    account.assigned_employee?.name,
+    account.assigned_employee?.email
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const normalizedHaystack = normalizedSearchText(haystack);
+
+  if (haystack.includes(plainNeedle)) return true;
+  if (normalizedNeedle && normalizedHaystack.includes(normalizedNeedle)) return true;
+  return pieces.length > 0 && pieces.every((piece) => haystack.includes(piece) || normalizedHaystack.includes(piece));
+}
+
 function inFilter(column: string, ids: string[]) {
   return ids.length ? `${column}.in.(${ids.join(",")})` : null;
 }
@@ -114,6 +153,7 @@ async function getProfileIdsMatchingTerm(supabase: Awaited<ReturnType<typeof cre
 
 async function getStockAccountIdsMatchingTerm(supabase: Awaited<ReturnType<typeof createClient>>, term: string) {
   const compactTerm = compactSearchTerm(term);
+  const pieces = searchPieces(term);
   const conditions = [
     `game_name.ilike.%${term}%`,
     `account_title.ilike.%${term}%`,
@@ -121,14 +161,21 @@ async function getStockAccountIdsMatchingTerm(supabase: Awaited<ReturnType<typeo
   ];
 
   if (compactTerm && compactTerm !== term) conditions.push(`secret_code.ilike.%${compactTerm}%`);
+  for (const piece of pieces) {
+    conditions.push(`game_name.ilike.%${piece}%`);
+    conditions.push(`account_title.ilike.%${piece}%`);
+    conditions.push(`secret_code.ilike.%${piece}%`);
+  }
 
   const { data } = await supabase
     .from("stock_accounts")
-    .select("id")
+    .select("id,game_name,account_title,secret_code,status")
     .or(conditions.join(","))
-    .limit(200);
+    .limit(500);
 
-  return ((data as Pick<StockAccount, "id">[]) ?? []).map((account) => account.id);
+  return ((data as StockAccount[]) ?? [])
+    .filter((account) => stockMatchesSearch(account, term))
+    .map((account) => account.id);
 }
 
 function paginateMemory<T>(rows: T[], page = 1, pageSize = DEFAULT_PAGE_SIZE): PagedResult<T> {
@@ -374,8 +421,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
       if (excludeSold && account.status === "sold") return false;
       if (assignedEmployeeId && account.assigned_employee_id !== assignedEmployeeId) return false;
       if (!term) return true;
-      const haystack = `${account.game_name} ${account.account_title} ${account.secret_code ?? ""} ${account.status} ${account.assigned_employee?.name ?? ""}`.toLowerCase();
-      return haystack.includes(term.toLowerCase());
+      return stockMatchesSearch(account, term);
     }).sort((a, b) => {
       const left = new Date(a.created_at).getTime();
       const right = new Date(b.created_at).getTime();
@@ -394,6 +440,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
   if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
   if (term) {
     const compactTerm = compactSearchTerm(term);
+    const pieces = searchPieces(term);
     const employeeIds = await getProfileIdsMatchingTerm(supabase, term);
     const conditions = [
       `game_name.ilike.%${term}%`,
@@ -404,8 +451,16 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     ].filter(Boolean);
 
     if (compactTerm && compactTerm !== term) conditions.push(`secret_code.ilike.%${compactTerm}%`);
+    for (const piece of pieces) {
+      conditions.push(`game_name.ilike.%${piece}%`);
+      conditions.push(`account_title.ilike.%${piece}%`);
+      conditions.push(`secret_code.ilike.%${piece}%`);
+    }
 
     query = query.or(conditions.join(","));
+    const { data } = await query.order("created_at", { ascending: sort === "oldest" }).limit(5000);
+    const rows = ((data as unknown as StockAccount[]) ?? []).filter((account) => stockMatchesSearch(account, term));
+    return paginateMemory(rows, page, pageSize);
   }
 
   const { data, count } = await query.order("created_at", { ascending: sort === "oldest" }).range(from, to);
