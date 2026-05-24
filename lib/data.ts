@@ -87,8 +87,48 @@ function pageRange(page = 1, pageSize = DEFAULT_PAGE_SIZE) {
 }
 
 function searchTerm(q?: string | null) {
-  const value = (q ?? "").trim();
+  const value = (q ?? "")
+    .replace(/[(),]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   return value.length ? value.replaceAll("%", "\\%").replaceAll("_", "\\_") : null;
+}
+
+function compactSearchTerm(term: string) {
+  return term.replace(/\s+/g, "");
+}
+
+function inFilter(column: string, ids: string[]) {
+  return ids.length ? `${column}.in.(${ids.join(",")})` : null;
+}
+
+async function getProfileIdsMatchingTerm(supabase: Awaited<ReturnType<typeof createClient>>, term: string) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("id")
+    .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%`)
+    .limit(100);
+
+  return ((data as Pick<Profile, "id">[]) ?? []).map((profile) => profile.id);
+}
+
+async function getStockAccountIdsMatchingTerm(supabase: Awaited<ReturnType<typeof createClient>>, term: string) {
+  const compactTerm = compactSearchTerm(term);
+  const conditions = [
+    `game_name.ilike.%${term}%`,
+    `account_title.ilike.%${term}%`,
+    `secret_code.ilike.%${term}%`
+  ];
+
+  if (compactTerm && compactTerm !== term) conditions.push(`secret_code.ilike.%${compactTerm}%`);
+
+  const { data } = await supabase
+    .from("stock_accounts")
+    .select("id")
+    .or(conditions.join(","))
+    .limit(200);
+
+  return ((data as Pick<StockAccount, "id">[]) ?? []).map((account) => account.id);
 }
 
 function paginateMemory<T>(rows: T[], page = 1, pageSize = DEFAULT_PAGE_SIZE): PagedResult<T> {
@@ -353,7 +393,19 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
   if (excludeSold) query = query.neq("status", "sold");
   if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
   if (term) {
-    query = query.or(`game_name.ilike.%${term}%,account_title.ilike.%${term}%,secret_code.ilike.%${term}%,status.ilike.%${term}%`);
+    const compactTerm = compactSearchTerm(term);
+    const employeeIds = await getProfileIdsMatchingTerm(supabase, term);
+    const conditions = [
+      `game_name.ilike.%${term}%`,
+      `account_title.ilike.%${term}%`,
+      `secret_code.ilike.%${term}%`,
+      `status.ilike.%${term}%`,
+      inFilter("assigned_employee_id", employeeIds)
+    ].filter(Boolean);
+
+    if (compactTerm && compactTerm !== term) conditions.push(`secret_code.ilike.%${compactTerm}%`);
+
+    query = query.or(conditions.join(","));
   }
 
   const { data, count } = await query.order("created_at", { ascending: sort === "oldest" }).range(from, to);
@@ -484,7 +536,20 @@ export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promis
   if (paymentStatus === "not_paid") query = query.neq("payment_status", "paid");
   if (paymentStatus && paymentStatus !== "not_paid") query = query.eq("payment_status", paymentStatus);
   if (term) {
-    query = query.or(`sold_source_website.ilike.%${term}%,buyer_contact.ilike.%${term}%,payment_status.ilike.%${term}%,notes.ilike.%${term}%`);
+    const [employeeIds, stockAccountIds] = await Promise.all([
+      getProfileIdsMatchingTerm(supabase, term),
+      getStockAccountIdsMatchingTerm(supabase, term)
+    ]);
+    const conditions = [
+      `sold_source_website.ilike.%${term}%`,
+      `buyer_contact.ilike.%${term}%`,
+      `payment_status.ilike.%${term}%`,
+      `notes.ilike.%${term}%`,
+      inFilter("employee_id", employeeIds),
+      inFilter("stock_account_id", stockAccountIds)
+    ].filter(Boolean);
+
+    query = query.or(conditions.join(","));
   }
 
   const { data, count } = await query.order("sold_date", { ascending: false }).range(from, to);
@@ -784,7 +849,15 @@ export async function getExpensesPage(options: ExpensePageOptions = {}): Promise
   if (categories?.length) query = query.in("category", categories);
   if (excludeCategories?.length) query = query.not("category", "in", `(${excludeCategories.join(",")})`);
   if (term) {
-    query = query.or(`title.ilike.%${term}%,category.ilike.%${term}%,notes.ilike.%${term}%`);
+    const payerIds = await getProfileIdsMatchingTerm(supabase, term);
+    const conditions = [
+      `title.ilike.%${term}%`,
+      `category.ilike.%${term}%`,
+      `notes.ilike.%${term}%`,
+      inFilter("paid_by", payerIds)
+    ].filter(Boolean);
+
+    query = query.or(conditions.join(","));
   }
 
   const { data, count } = await query.order("expense_date", { ascending: false }).range(from, to);
