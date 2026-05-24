@@ -7,9 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/prepare-standalone.cjs",
     "start": "next start",
-    "start:render": "next start -H 0.0.0.0 -p ${PORT:-10000}",
+    "start:render": "HOSTNAME=0.0.0.0 PORT=${PORT:-10000} node .next/standalone/server.js",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "live:create-admin": "node scripts/create-live-admin.cjs"

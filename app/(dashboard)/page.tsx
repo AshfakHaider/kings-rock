@@ -15,8 +15,17 @@ import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatCard } from "@/components/modules/stat-card";
 import { Select } from "@/components/ui/select";
-import { getCurrentProfile, getDashboardSnapshot, getExpenses, getSoldAccounts, getStockAccounts } from "@/lib/data";
-import { employeeProfitSeries, getProfit, isPaidSale, saleCashDate, salesBySource, stockValueByGame } from "@/lib/metrics";
+import {
+  getCurrentProfile,
+  getDashboardExpenseTotal,
+  getDashboardPaidSales,
+  getDashboardSnapshot,
+  getDashboardWaitingSales,
+  getStockTotals,
+  getStockValueByGameSummary
+} from "@/lib/data";
+import { employeeProfitSeries, getProfit, saleCashDate, salesBySource } from "@/lib/metrics";
+import type { SoldAccount } from "@/lib/types";
 import { formatDate, money } from "@/lib/utils";
 
 const monthNames = [
@@ -45,19 +54,11 @@ function safeMonth(value: string | undefined, fallback: number) {
   return Number.isInteger(month) && month >= 1 && month <= 12 ? month : fallback;
 }
 
-function dateInPeriod(dateValue: string | null | undefined, year: number, month: number | "all") {
-  if (!dateValue) return false;
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return false;
-  if (date.getFullYear() !== year) return false;
-  return month === "all" || date.getMonth() + 1 === month;
-}
-
-function buildMonthlySeriesForYear(sales: Awaited<ReturnType<typeof getSoldAccounts>>, year: number) {
+function buildMonthlySeriesForYear(sales: SoldAccount[], year: number) {
   return monthNames.map((month, index) => {
     const monthSales = sales.filter((sale) => {
       const cashDate = new Date(saleCashDate(sale));
-      return isPaidSale(sale) && cashDate.getFullYear() === year && cashDate.getMonth() === index;
+      return cashDate.getFullYear() === year && cashDate.getMonth() === index;
     });
 
     return {
@@ -77,62 +78,52 @@ export default async function DashboardPage({
   const now = new Date();
   const selectedYear = safeYear(params.year, now.getFullYear());
   const selectedMonth = safeMonth(params.month, now.getMonth() + 1);
-  const [snapshot, soldAccounts, stockAccounts, expenses, currentProfile] = await Promise.all([
+  const [snapshot, currentProfile] = await Promise.all([
     getDashboardSnapshot(),
-    getSoldAccounts(),
-    getStockAccounts(),
-    getExpenses(),
     getCurrentProfile()
   ]);
   const canViewFinancials = snapshot.role !== "employee";
   const metrics = snapshot.metrics;
+  const employeeId = currentProfile.role === "employee" ? currentProfile.id : null;
 
-  const visibleSoldAccounts =
-    currentProfile.role === "employee"
-      ? soldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
-      : soldAccounts;
-  const visibleExpenses =
-    currentProfile.role === "employee"
-      ? expenses.filter((expense) => expense.paid_by === currentProfile.id)
-      : expenses;
-  const nonSoldStockAccounts = stockAccounts.filter((account) => account.status !== "sold");
-  const totalStockBuyingValue = nonSoldStockAccounts.reduce((total, account) => total + Number(account.buying_price), 0);
-  const totalStockSellingValue = nonSoldStockAccounts.reduce((total, account) => total + Number(account.selling_price ?? 0), 0);
-  const filteredPaidSales = visibleSoldAccounts
-    .filter(isPaidSale)
-    .filter((sale) => dateInPeriod(saleCashDate(sale), selectedYear, selectedMonth));
-  const filteredWaitingPayments = visibleSoldAccounts
-    .filter((sale) => !isPaidSale(sale))
-    .filter((sale) => dateInPeriod(sale.sold_date, selectedYear, selectedMonth));
-  const filteredExpenses = visibleExpenses.filter((expense) =>
-    dateInPeriod(expense.expense_date, selectedYear, selectedMonth)
-  );
+  const [
+    stockTotals,
+    currentStockValueByGame,
+    filteredPaidSales,
+    selectedYearPaidSales,
+    filteredWaitingPayments,
+    filteredExpenseAmount
+  ] = await Promise.all([
+    getStockTotals({ excludeSold: true }),
+    getStockValueByGameSummary(),
+    getDashboardPaidSales({ year: selectedYear, month: selectedMonth, employeeId }),
+    getDashboardPaidSales({ year: selectedYear, month: "all", employeeId }),
+    getDashboardWaitingSales({ year: selectedYear, month: selectedMonth, employeeId, limit: 8 }),
+    getDashboardExpenseTotal({ year: selectedYear, month: selectedMonth, paidBy: employeeId })
+  ]);
+
+  const totalStockBuyingValue = stockTotals.buyingValue;
+  const totalStockSellingValue = stockTotals.sellingValue;
   const filteredSalesAmount = filteredPaidSales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
   const filteredBuyingCost = filteredPaidSales.reduce((total, sale) => total + Number(sale.stock_account?.buying_price ?? 0), 0);
   const filteredGrossProfit = filteredSalesAmount - filteredBuyingCost;
-  const filteredExpenseAmount = filteredExpenses.reduce((total, expense) => total + Number(expense.amount), 0);
   const filteredWaitingAmount = filteredWaitingPayments.reduce((total, sale) => total + Number(sale.sold_amount), 0);
-  const selectedYearPaidSales = visibleSoldAccounts
-    .filter(isPaidSale)
-    .filter((sale) => dateInPeriod(saleCashDate(sale), selectedYear, "all"));
   const selectedYearProfit = selectedYearPaidSales.reduce((total, sale) => total + getProfit(sale), 0);
   const sourceRows = canViewFinancials ? salesBySource(filteredPaidSales).slice(0, 5) : [];
-  const waitingPayments = filteredWaitingPayments
-    .slice(0, 8);
   const yearOptions = Array.from(
     new Set([
       now.getFullYear(),
       selectedYear,
-      ...soldAccounts.map((sale) => new Date(saleCashDate(sale)).getFullYear()),
-      ...expenses.map((expense) => new Date(expense.expense_date).getFullYear())
+      now.getFullYear() - 1,
+      now.getFullYear() - 2,
+      now.getFullYear() + 1
     ])
   )
     .filter((year) => Number.isInteger(year) && year >= 2020 && year <= 2100)
     .sort((a, b) => b - a);
   const periodLabel = selectedMonth === "all" ? String(selectedYear) : `${monthNames[selectedMonth - 1]} ${selectedYear}`;
-  const yearMonthlySeries = buildMonthlySeriesForYear(visibleSoldAccounts, selectedYear);
+  const yearMonthlySeries = buildMonthlySeriesForYear(selectedYearPaidSales, selectedYear);
   const filteredEmployeeSeries = employeeProfitSeries(filteredPaidSales);
-  const currentStockValueByGame = stockValueByGame(stockAccounts);
 
   return (
     <>
@@ -178,7 +169,7 @@ export default async function DashboardPage({
       </form>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Total stock accounts" value={String(nonSoldStockAccounts.length)} icon={Boxes} />
+        <StatCard title="Total stock accounts" value={String(metrics.totalStockAccounts)} icon={Boxes} />
         {canViewFinancials ? (
           <StatCard
             title="Stock buying value"
@@ -268,7 +259,7 @@ export default async function DashboardPage({
           </p>
         </div>
         <ResponsiveTable
-          rows={waitingPayments}
+          rows={filteredWaitingPayments}
           searchPlaceholder="Search waiting payments..."
           emptyTitle="No waiting payments"
           emptyDescription="When a sold account is waiting for platform payout, it will appear here."

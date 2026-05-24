@@ -72,6 +72,12 @@ type SoldPageOptions = PageOptions & {
   paymentStatus?: "paid" | "pending" | "partial" | "not_paid";
 };
 
+type DashboardPeriodOptions = {
+  year: number;
+  month: number | "all";
+  employeeId?: string | null;
+};
+
 function pageRange(page = 1, pageSize = DEFAULT_PAGE_SIZE) {
   const safePage = Number.isFinite(page) && page > 0 ? Math.trunc(page) : 1;
   const safePageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.trunc(pageSize) : DEFAULT_PAGE_SIZE;
@@ -87,6 +93,18 @@ function searchTerm(q?: string | null) {
 function paginateMemory<T>(rows: T[], page = 1, pageSize = DEFAULT_PAGE_SIZE): PagedResult<T> {
   const { from, to } = pageRange(page, pageSize);
   return { rows: rows.slice(from, to + 1), total: rows.length };
+}
+
+function saleCashDateValue(sale: Pick<SoldAccount, "payment_received_date" | "sold_date">) {
+  return sale.payment_received_date ?? sale.sold_date;
+}
+
+function inDashboardPeriod(dateValue: string | null | undefined, year: number, month: number | "all") {
+  if (!dateValue) return false;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+  if (date.getFullYear() !== year) return false;
+  return month === "all" || date.getMonth() + 1 === month;
 }
 
 function normalizeSettings(settings: Settings): Settings {
@@ -448,6 +466,103 @@ export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promis
     rows: (data as SoldAccount[]) ?? [],
     total: count ?? 0
   };
+}
+
+export async function getDashboardPaidSales(options: DashboardPeriodOptions): Promise<SoldAccount[]> {
+  const { year, month, employeeId = null } = options;
+
+  if (!hasSupabaseEnv()) {
+    return (await getDemoSoldAccounts()).filter((sale) => {
+      if (sale.payment_status !== "paid") return false;
+      if (employeeId && sale.employee_id !== employeeId) return false;
+      return inDashboardPeriod(saleCashDateValue(sale), year, month);
+    });
+  }
+
+  const supabase = await createClient();
+  let query = supabase
+    .from("sold_accounts")
+    .select("id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at,stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
+    .eq("payment_status", "paid")
+    .order("sold_date", { ascending: false })
+    .limit(2000);
+
+  if (employeeId) query = query.eq("employee_id", employeeId);
+
+  const { data } = await query;
+  return ((data as unknown as SoldAccount[]) ?? []).filter((sale) =>
+    inDashboardPeriod(saleCashDateValue(sale), year, month)
+  );
+}
+
+export async function getDashboardWaitingSales(options: DashboardPeriodOptions & { limit?: number }): Promise<SoldAccount[]> {
+  const { year, month, employeeId = null, limit = 8 } = options;
+
+  if (!hasSupabaseEnv()) {
+    return (await getDemoSoldAccounts())
+      .filter((sale) => {
+        if (sale.payment_status === "paid") return false;
+        if (employeeId && sale.employee_id !== employeeId) return false;
+        return inDashboardPeriod(sale.sold_date, year, month);
+      })
+      .slice(0, limit);
+  }
+
+  const supabase = await createClient();
+  let query = supabase
+    .from("sold_accounts")
+    .select("id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at,stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
+    .neq("payment_status", "paid")
+    .order("sold_date", { ascending: false })
+    .limit(200);
+
+  if (employeeId) query = query.eq("employee_id", employeeId);
+
+  const { data } = await query;
+  return ((data as unknown as SoldAccount[]) ?? [])
+    .filter((sale) => inDashboardPeriod(sale.sold_date, year, month))
+    .slice(0, limit);
+}
+
+export async function getDashboardExpenseTotal(options: DashboardPeriodOptions & { paidBy?: string | null }) {
+  const { year, month, paidBy = null } = options;
+
+  if (!hasSupabaseEnv()) {
+    return (await getDemoExpenses())
+      .filter((expense) => {
+        if (paidBy && expense.paid_by !== paidBy) return false;
+        return inDashboardPeriod(expense.expense_date, year, month);
+      })
+      .reduce((total, expense) => total + Number(expense.amount), 0);
+  }
+
+  const supabase = await createClient();
+  let query = supabase.from("expenses").select("amount,expense_date").limit(2000);
+  if (paidBy) query = query.eq("paid_by", paidBy);
+  const { data } = await query;
+  return ((data as Pick<Expense, "amount" | "expense_date">[]) ?? [])
+    .filter((expense) => inDashboardPeriod(expense.expense_date, year, month))
+    .reduce((total, expense) => total + Number(expense.amount), 0);
+}
+
+export async function getStockValueByGameSummary() {
+  if (!hasSupabaseEnv()) return stockValueByGame(await getStockAccounts());
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("stock_accounts")
+    .select("game_name,buying_price")
+    .neq("status", "sold");
+  const rows = (data as Pick<StockAccount, "game_name" | "buying_price">[]) ?? [];
+  const buckets = new Map<string, { game: string; value: number }>();
+
+  for (const account of rows) {
+    const item = buckets.get(account.game_name) ?? { game: account.game_name, value: 0 };
+    item.value += Number(account.buying_price);
+    buckets.set(account.game_name, item);
+  }
+
+  return Array.from(buckets.values());
 }
 
 export async function getMonthlyLeaderboard(year: number, month: number): Promise<LeaderboardEntry[]> {
