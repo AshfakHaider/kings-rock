@@ -231,13 +231,36 @@ export async function getProfiles(): Promise<Profile[]> {
 }
 
 export async function getStockAccounts(): Promise<StockAccount[]> {
-  if (!hasSupabaseEnv()) return getDemoStockAccounts();
+  if (!hasSupabaseEnv()) {
+    const accounts = await getDemoStockAccounts();
+    return accounts.map((account) => ({
+      ...account,
+      image_url: null,
+      image_urls: []
+    }));
+  }
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("stock_accounts")
+    .select("id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)")
+    .order("created_at", { ascending: false });
+  return (data as unknown as StockAccount[]) ?? [];
+}
+
+export async function getStockAccount(id: string): Promise<StockAccount | null> {
+  if (!hasSupabaseEnv()) {
+    const accounts = await getDemoStockAccounts();
+    return accounts.find((account) => account.id === id) ?? null;
+  }
+
   const supabase = await createClient();
   const { data } = await supabase
     .from("stock_accounts")
     .select("*, assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)")
-    .order("created_at", { ascending: false });
-  return (data as StockAccount[]) ?? [];
+    .eq("id", id)
+    .maybeSingle();
+
+  return (data as StockAccount | null) ?? null;
 }
 
 export async function getStockAccountCredential(

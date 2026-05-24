@@ -8,7 +8,7 @@ import { StockImageGallery } from "@/components/stock/stock-image-gallery";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { getCurrentProfile, getProfiles, getSettings, getStockAccount } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -22,13 +22,12 @@ export default async function StockAccountDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [settings, accounts, profiles, currentProfile] = await Promise.all([
+  const [settings, account, profiles, currentProfile] = await Promise.all([
     getSettings(),
-    getStockAccounts(),
+    getStockAccount(id),
     getProfiles(),
     getCurrentProfile()
   ]);
-  const account = accounts.find((item) => item.id === id);
 
   if (!account) notFound();
   const canViewBuyingPrice = currentProfile.role !== "employee";
