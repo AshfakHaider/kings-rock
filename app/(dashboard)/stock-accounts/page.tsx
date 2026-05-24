@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
-import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockTotals } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 import Link from "next/link";
@@ -39,23 +39,21 @@ function withPrivateNotesForCurrentUser<T extends { assigned_employee_id?: strin
 
 export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
-  const [settings, stockAccounts, profiles, currentProfile] = await Promise.all([
+  const page = Number(params.page ?? 1);
+  const [settings, stockPage, stockTotals, profiles, currentProfile] = await Promise.all([
     getSettings(),
-    getStockAccounts(),
+    getStockAccountsPage({ page, pageSize: DEFAULT_PAGE_SIZE, q: params.q, excludeSold: true }),
+    getStockTotals({ excludeSold: true }),
     getProfiles(),
     getCurrentProfile()
   ]);
-  const visibleStockAccounts = stockAccounts.filter((account) => account.status !== "sold");
+  const visibleStockAccounts = stockPage.rows;
   const employees = profiles.filter((profile) => profile.role !== "admin" && profile.status === "active");
   const canViewBuyingPrice = currentProfile.role !== "employee";
   const canManageStockRecords = currentProfile.role !== "employee";
-  const totalAvailable = stockAccounts.filter((account) => account.status === "available").length;
-  const stockValue = stockAccounts
-    .filter((account) => account.status !== "sold")
-    .reduce((total, account) => total + Number(account.buying_price), 0);
-  const stockSellingValue = stockAccounts
-    .filter((account) => account.status !== "sold")
-    .reduce((total, account) => total + Number(account.selling_price ?? 0), 0);
+  const totalAvailable = stockTotals.availableCount;
+  const stockValue = stockTotals.buyingValue;
+  const stockSellingValue = stockTotals.sellingValue;
   type StockRow = (typeof visibleStockAccounts)[number];
 
   return (
@@ -80,7 +78,10 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
       <ResponsiveTable
         rows={visibleStockAccounts}
         searchQuery={params.q}
-        page={Number(params.page ?? 1)}
+        page={page}
+        pageSize={DEFAULT_PAGE_SIZE}
+        totalRows={stockPage.total}
+        serverSide
         searchPlaceholder="Search by game, title, secret code, employee..."
         columns={[
           {

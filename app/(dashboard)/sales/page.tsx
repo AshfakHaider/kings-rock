@@ -3,7 +3,7 @@ import { MarkSoldModal } from "@/components/sales/mark-sold-modal";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
-import { getCurrentProfile, getProfiles, getSettings, getStockAccounts } from "@/lib/data";
+import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -17,20 +17,21 @@ function withoutImages<T extends { image_url?: string | null; image_urls?: strin
 
 export default async function SalesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
-  const [settings, stockAccounts, profiles, currentProfile] = await Promise.all([
+  const page = Number(params.page ?? 1);
+  const [settings, profiles, currentProfile] = await Promise.all([
     getSettings(),
-    getStockAccounts(),
     getProfiles(),
     getCurrentProfile()
   ]);
-  const canViewBuyingPrice = currentProfile.role !== "employee";
-  const sellableAccounts = stockAccounts.filter((account) => {
-    if (account.status === "sold") return false;
-    if (currentProfile.role === "employee") {
-      return account.assigned_employee_id === currentProfile.id;
-    }
-    return true;
+  const stockPage = await getStockAccountsPage({
+    page,
+    pageSize: DEFAULT_PAGE_SIZE,
+    q: params.q,
+    excludeSold: true,
+    assignedEmployeeId: currentProfile.role === "employee" ? currentProfile.id : null
   });
+  const canViewBuyingPrice = currentProfile.role !== "employee";
+  const sellableAccounts = stockPage.rows;
   const employees =
     currentProfile.role === "employee"
       ? profiles.filter((profile) => profile.id === currentProfile.id)
@@ -47,7 +48,10 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
       <ResponsiveTable
         rows={sellableAccounts}
         searchQuery={params.q}
-        page={Number(params.page ?? 1)}
+        page={page}
+        pageSize={DEFAULT_PAGE_SIZE}
+        totalRows={stockPage.total}
+        serverSide
         searchPlaceholder="Search accounts by code, title, game..."
         emptyTitle="No accounts ready for sale"
         emptyDescription="Add stock accounts first, then every non-sold account will appear here."

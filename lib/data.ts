@@ -43,6 +43,52 @@ import {
 } from "@/lib/metrics";
 import { normalizeCurrency } from "@/lib/utils";
 
+export const DEFAULT_PAGE_SIZE = 50;
+
+type PagedResult<T> = {
+  rows: T[];
+  total: number;
+};
+
+type PageOptions = {
+  page?: number;
+  pageSize?: number;
+  q?: string | null;
+};
+
+type StockPageOptions = PageOptions & {
+  excludeSold?: boolean;
+  assignedEmployeeId?: string | null;
+};
+
+type ExpensePageOptions = PageOptions & {
+  categories?: string[];
+  excludeCategories?: string[];
+  paidBy?: string | null;
+};
+
+type SoldPageOptions = PageOptions & {
+  employeeId?: string | null;
+  paymentStatus?: "paid" | "pending" | "partial" | "not_paid";
+};
+
+function pageRange(page = 1, pageSize = DEFAULT_PAGE_SIZE) {
+  const safePage = Number.isFinite(page) && page > 0 ? Math.trunc(page) : 1;
+  const safePageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.trunc(pageSize) : DEFAULT_PAGE_SIZE;
+  const from = (safePage - 1) * safePageSize;
+  return { from, to: from + safePageSize - 1 };
+}
+
+function searchTerm(q?: string | null) {
+  const value = (q ?? "").trim();
+  return value.length ? value.replaceAll("%", "\\%").replaceAll("_", "\\_") : null;
+}
+
+function paginateMemory<T>(rows: T[], page = 1, pageSize = DEFAULT_PAGE_SIZE): PagedResult<T> {
+  const { from, to } = pageRange(page, pageSize);
+  return { rows: rows.slice(from, to + 1), total: rows.length };
+}
+
 function normalizeSettings(settings: Settings): Settings {
   return {
     ...settings,
@@ -247,6 +293,64 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
   return (data as unknown as StockAccount[]) ?? [];
 }
 
+export async function getStockAccountsPage(options: StockPageOptions = {}): Promise<PagedResult<StockAccount>> {
+  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, excludeSold = false, assignedEmployeeId = null } = options;
+  const term = searchTerm(options.q);
+
+  if (!hasSupabaseEnv()) {
+    const rows = (await getStockAccounts()).filter((account) => {
+      if (excludeSold && account.status === "sold") return false;
+      if (assignedEmployeeId && account.assigned_employee_id !== assignedEmployeeId) return false;
+      if (!term) return true;
+      const haystack = `${account.game_name} ${account.account_title} ${account.secret_code ?? ""} ${account.status} ${account.assigned_employee?.name ?? ""}`.toLowerCase();
+      return haystack.includes(term.toLowerCase());
+    });
+    return paginateMemory(rows, page, pageSize);
+  }
+
+  const supabase = await createClient();
+  const { from, to } = pageRange(page, pageSize);
+  let query = supabase
+    .from("stock_accounts")
+    .select("id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)", { count: "exact" });
+
+  if (excludeSold) query = query.neq("status", "sold");
+  if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
+  if (term) {
+    query = query.or(`game_name.ilike.%${term}%,account_title.ilike.%${term}%,secret_code.ilike.%${term}%,status.ilike.%${term}%`);
+  }
+
+  const { data, count } = await query.order("created_at", { ascending: false }).range(from, to);
+  return {
+    rows: (data as unknown as StockAccount[]) ?? [],
+    total: count ?? 0
+  };
+}
+
+export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
+  if (!hasSupabaseEnv()) {
+    const accounts = await getStockAccounts();
+    const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
+    return {
+      availableCount: accounts.filter((account) => account.status === "available").length,
+      buyingValue: rows.reduce((total, account) => total + Number(account.buying_price), 0),
+      sellingValue: rows.reduce((total, account) => total + Number(account.selling_price ?? 0), 0)
+    };
+  }
+
+  const supabase = await createClient();
+  let query = supabase.from("stock_accounts").select("status,buying_price,selling_price");
+  if (options.excludeSold) query = query.neq("status", "sold");
+  const { data } = await query;
+  const rows = (data as Pick<StockAccount, "status" | "buying_price" | "selling_price">[]) ?? [];
+
+  return {
+    availableCount: rows.filter((account) => account.status === "available").length,
+    buyingValue: rows.reduce((total, account) => total + Number(account.buying_price), 0),
+    sellingValue: rows.reduce((total, account) => total + Number(account.selling_price ?? 0), 0)
+  };
+}
+
 export async function getStockAccount(id: string): Promise<StockAccount | null> {
   if (!hasSupabaseEnv()) {
     const accounts = await getDemoStockAccounts();
@@ -308,6 +412,42 @@ export async function getSoldAccounts(): Promise<SoldAccount[]> {
     .select("*, stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
     .order("sold_date", { ascending: false });
   return (data as SoldAccount[]) ?? [];
+}
+
+export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promise<PagedResult<SoldAccount>> {
+  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, employeeId = null, paymentStatus } = options;
+  const term = searchTerm(options.q);
+
+  if (!hasSupabaseEnv()) {
+    const rows = (await getSoldAccounts()).filter((sale) => {
+      if (employeeId && sale.employee_id !== employeeId) return false;
+      if (paymentStatus === "not_paid" && sale.payment_status === "paid") return false;
+      if (paymentStatus && paymentStatus !== "not_paid" && sale.payment_status !== paymentStatus) return false;
+      if (!term) return true;
+      const haystack = `${sale.stock_account?.secret_code ?? ""} ${sale.stock_account?.account_title ?? ""} ${sale.stock_account?.game_name ?? ""} ${sale.employee?.name ?? ""} ${sale.employee?.email ?? ""} ${sale.sold_source_website ?? ""} ${sale.buyer_contact ?? ""} ${sale.payment_status}`.toLowerCase();
+      return haystack.includes(term.toLowerCase());
+    });
+    return paginateMemory(rows, page, pageSize);
+  }
+
+  const supabase = await createClient();
+  const { from, to } = pageRange(page, pageSize);
+  let query = supabase
+    .from("sold_accounts")
+    .select("*, stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)", { count: "exact" });
+
+  if (employeeId) query = query.eq("employee_id", employeeId);
+  if (paymentStatus === "not_paid") query = query.neq("payment_status", "paid");
+  if (paymentStatus && paymentStatus !== "not_paid") query = query.eq("payment_status", paymentStatus);
+  if (term) {
+    query = query.or(`sold_source_website.ilike.%${term}%,buyer_contact.ilike.%${term}%,payment_status.ilike.%${term}%,notes.ilike.%${term}%`);
+  }
+
+  const { data, count } = await query.order("sold_date", { ascending: false }).range(from, to);
+  return {
+    rows: (data as SoldAccount[]) ?? [],
+    total: count ?? 0
+  };
 }
 
 export async function getMonthlyLeaderboard(year: number, month: number): Promise<LeaderboardEntry[]> {
@@ -438,6 +578,82 @@ export async function getExpenses(): Promise<Expense[]> {
     .select("*, payer:profiles!expenses_paid_by_fkey(id,name,email)")
     .order("expense_date", { ascending: false });
   return (data as Expense[]) ?? [];
+}
+
+export async function getExpensesPage(options: ExpensePageOptions = {}): Promise<PagedResult<Expense>> {
+  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, categories, excludeCategories, paidBy = null } = options;
+  const term = searchTerm(options.q);
+
+  if (!hasSupabaseEnv()) {
+    const rows = (await getExpenses()).filter((expense) => {
+      if (paidBy && expense.paid_by !== paidBy) return false;
+      if (categories?.length && !categories.includes(expense.category)) return false;
+      if (excludeCategories?.length && excludeCategories.includes(expense.category)) return false;
+      if (!term) return true;
+      const haystack = `${expense.title} ${expense.category} ${expense.payer?.name ?? ""} ${expense.notes ?? ""}`.toLowerCase();
+      return haystack.includes(term.toLowerCase());
+    });
+    return paginateMemory(rows, page, pageSize);
+  }
+
+  const supabase = await createClient();
+  const { from, to } = pageRange(page, pageSize);
+  let query = supabase
+    .from("expenses")
+    .select("*, payer:profiles!expenses_paid_by_fkey(id,name,email)", { count: "exact" });
+
+  if (paidBy) query = query.eq("paid_by", paidBy);
+  if (categories?.length) query = query.in("category", categories);
+  if (excludeCategories?.length) query = query.not("category", "in", `(${excludeCategories.join(",")})`);
+  if (term) {
+    query = query.or(`title.ilike.%${term}%,category.ilike.%${term}%,notes.ilike.%${term}%`);
+  }
+
+  const { data, count } = await query.order("expense_date", { ascending: false }).range(from, to);
+  return {
+    rows: (data as Expense[]) ?? [],
+    total: count ?? 0
+  };
+}
+
+export async function getExpenseTotals(options: Omit<ExpensePageOptions, "page" | "pageSize" | "q"> = {}) {
+  const { categories, excludeCategories, paidBy = null } = options;
+
+  if (!hasSupabaseEnv()) {
+    const expenses = (await getExpenses()).filter((expense) => {
+      if (paidBy && expense.paid_by !== paidBy) return false;
+      if (categories?.length && !categories.includes(expense.category)) return false;
+      if (excludeCategories?.length && excludeCategories.includes(expense.category)) return false;
+      return true;
+    });
+    return {
+      total: expenses.reduce((sum, expense) => sum + Number(expense.amount), 0),
+      byCategory: Object.fromEntries(
+        categories?.map((category) => [
+          category,
+          expenses.filter((expense) => expense.category === category).reduce((sum, expense) => sum + Number(expense.amount), 0)
+        ]) ?? []
+      )
+    };
+  }
+
+  const supabase = await createClient();
+  let query = supabase.from("expenses").select("category,amount");
+  if (paidBy) query = query.eq("paid_by", paidBy);
+  if (categories?.length) query = query.in("category", categories);
+  if (excludeCategories?.length) query = query.not("category", "in", `(${excludeCategories.join(",")})`);
+  const { data } = await query;
+  const expenses = (data as Pick<Expense, "category" | "amount">[]) ?? [];
+
+  return {
+    total: expenses.reduce((sum, expense) => sum + Number(expense.amount), 0),
+    byCategory: Object.fromEntries(
+      categories?.map((category) => [
+        category,
+        expenses.filter((expense) => expense.category === category).reduce((sum, expense) => sum + Number(expense.amount), 0)
+      ]) ?? []
+    )
+  };
 }
 
 export async function getActivityLogs(): Promise<ActivityLog[]> {

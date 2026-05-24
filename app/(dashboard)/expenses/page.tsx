@@ -4,25 +4,29 @@ import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
-import { getCurrentProfile, getExpenses, getProfiles, getSettings } from "@/lib/data";
+import { DEFAULT_PAGE_SIZE, getCurrentProfile, getExpenseTotals, getExpensesPage, getProfiles, getSettings } from "@/lib/data";
 import { formatDate, money } from "@/lib/utils";
 
 const lossCategories = new Set(["scam_account", "refund_account"]);
 
 export default async function ExpensesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
-  const [settings, allExpenses, profiles, currentProfile] = await Promise.all([
+  const page = Number(params.page ?? 1);
+  const [settings, profiles, currentProfile] = await Promise.all([
     getSettings(),
-    getExpenses(),
     getProfiles(),
     getCurrentProfile()
   ]);
-  const visibleExpenses =
-    currentProfile.role === "employee"
-      ? allExpenses.filter((expense) => expense.paid_by === currentProfile.id)
-      : allExpenses;
-  const expenses = visibleExpenses.filter((expense) => !lossCategories.has(expense.category));
-  const total = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  const expenseFilter = {
+    excludeCategories: Array.from(lossCategories),
+    paidBy: currentProfile.role === "employee" ? currentProfile.id : null
+  };
+  const [expensePage, totals] = await Promise.all([
+    getExpensesPage({ ...expenseFilter, page, pageSize: DEFAULT_PAGE_SIZE, q: params.q }),
+    getExpenseTotals(expenseFilter)
+  ]);
+  const expenses = expensePage.rows;
+  const total = totals.total;
   const employees = profiles.filter((profile) => profile.status === "active");
   const expenseCategories = settings.expense_categories.filter((category) => !lossCategories.has(category));
   const canManageExpenses = currentProfile.role !== "employee";
@@ -47,7 +51,10 @@ export default async function ExpensesPage({ searchParams }: { searchParams?: Pr
       <ResponsiveTable
         rows={expenses}
         searchQuery={params.q}
-        page={Number(params.page ?? 1)}
+        page={page}
+        pageSize={DEFAULT_PAGE_SIZE}
+        totalRows={expensePage.total}
+        serverSide
         searchPlaceholder="Search expenses..."
         columns={[
           { key: "title", header: "Title", cell: (row) => row.title, searchValue: (row) => row.title },

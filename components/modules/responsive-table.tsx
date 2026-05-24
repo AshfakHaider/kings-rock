@@ -25,6 +25,8 @@ export function ResponsiveTable<T>({
   pageParam = "page",
   additionalQuery = {},
   paginate = true,
+  serverSide = false,
+  totalRows,
   className
 }: {
   rows: T[];
@@ -38,10 +40,14 @@ export function ResponsiveTable<T>({
   pageParam?: string;
   additionalQuery?: Record<string, string | number | undefined | null>;
   paginate?: boolean;
+  serverSide?: boolean;
+  totalRows?: number;
   className?: string;
 }) {
   const q = searchQuery.trim().toLowerCase();
-  const visibleRows = q
+  const visibleRows = serverSide
+    ? rows
+    : q
     ? rows.filter((row) =>
         columns.some((column) =>
           (column.searchValue?.(row) ?? "")
@@ -50,10 +56,11 @@ export function ResponsiveTable<T>({
         )
       )
     : rows;
-  const totalPages = paginate ? Math.max(1, Math.ceil(visibleRows.length / pageSize)) : 1;
+  const resultCount = serverSide ? (totalRows ?? rows.length) : visibleRows.length;
+  const totalPages = paginate ? Math.max(1, Math.ceil(resultCount / pageSize)) : 1;
   const currentPage = paginate ? Math.min(Math.max(1, Number.isFinite(page) ? Math.trunc(page) : 1), totalPages) : 1;
   const start = paginate ? (currentPage - 1) * pageSize : 0;
-  const pagedRows = paginate ? visibleRows.slice(start, start + pageSize) : visibleRows;
+  const pagedRows = serverSide ? visibleRows : paginate ? visibleRows.slice(start, start + pageSize) : visibleRows;
 
   function pageHref(nextPage: number) {
     const params = new URLSearchParams();
@@ -92,7 +99,7 @@ export function ResponsiveTable<T>({
         </Button>
       </form>
 
-      {visibleRows.length === 0 ? (
+      {pagedRows.length === 0 ? (
         <EmptyState title={emptyTitle} description={emptyDescription} />
       ) : (
         <>
@@ -141,7 +148,7 @@ export function ResponsiveTable<T>({
           {paginate && totalPages > 1 ? (
             <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
               <p className="text-muted-foreground">
-                Showing {start + 1}-{Math.min(start + pageSize, visibleRows.length)} of {visibleRows.length}
+                Showing {start + 1}-{Math.min(start + pageSize, resultCount)} of {resultCount}
               </p>
               <div className="flex items-center justify-end gap-2">
                 <Button asChild variant="outline" size="sm" className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}>

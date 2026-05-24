@@ -4,13 +4,14 @@ import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { Button } from "@/components/ui/button";
-import { getCurrentProfile, getSettings, getSoldAccounts } from "@/lib/data";
+import { DEFAULT_PAGE_SIZE, getCurrentProfile, getSettings, getSoldAccounts, getSoldAccountsPage } from "@/lib/data";
 import { getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function SoldAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
+  const page = Number(params.page ?? 1);
   const [settings, allSoldAccounts, currentProfile] = await Promise.all([
     getSettings(),
     getSoldAccounts(),
@@ -22,9 +23,24 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
     currentProfile.role === "employee"
       ? allSoldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
       : allSoldAccounts;
-  const waitingSoldAccounts = soldAccounts.filter((sale) => !isPaidSale(sale));
+  const [soldPage, waitingPage] = await Promise.all([
+    getSoldAccountsPage({
+      page,
+      pageSize: DEFAULT_PAGE_SIZE,
+      q: params.q,
+      employeeId: currentProfile.role === "employee" ? currentProfile.id : null
+    }),
+    getSoldAccountsPage({
+      page,
+      pageSize: DEFAULT_PAGE_SIZE,
+      q: params.q,
+      employeeId: currentProfile.role === "employee" ? currentProfile.id : null,
+      paymentStatus: "not_paid"
+    })
+  ]);
+  const waitingSoldAccounts = waitingPage.rows;
   const sourceRows = salesBySource(soldAccounts);
-  type SoldRow = (typeof soldAccounts)[number];
+  type SoldRow = (typeof soldPage.rows)[number];
 
   return (
     <>
@@ -43,7 +59,11 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
         </div>
         <ResponsiveTable
           rows={waitingSoldAccounts}
-          page={Number(params.page ?? 1)}
+          searchQuery={params.q}
+          page={page}
+          pageSize={DEFAULT_PAGE_SIZE}
+          totalRows={waitingPage.total}
+          serverSide
           searchPlaceholder="Search waiting payments..."
           emptyTitle="No waiting payments"
           emptyDescription="Newly sold accounts will appear here until payment is received."
@@ -97,9 +117,12 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
       </section>
 
       <ResponsiveTable
-        rows={soldAccounts}
+        rows={soldPage.rows}
         searchQuery={params.q}
-        page={Number(params.page ?? 1)}
+        page={page}
+        pageSize={DEFAULT_PAGE_SIZE}
+        totalRows={soldPage.total}
+        serverSide
         searchPlaceholder="Search sales by account, employee, buyer, source..."
         columns={[
           {

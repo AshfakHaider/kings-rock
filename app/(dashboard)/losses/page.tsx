@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatCard } from "@/components/modules/stat-card";
 import { StatusBadge } from "@/components/modules/status-badge";
-import { getCurrentProfile, getExpenses, getProfiles, getSettings } from "@/lib/data";
+import { DEFAULT_PAGE_SIZE, getCurrentProfile, getExpenseTotals, getExpensesPage, getProfiles, getSettings } from "@/lib/data";
 import type { Expense } from "@/lib/types";
 import { formatDate, money } from "@/lib/utils";
 
@@ -54,25 +54,27 @@ function LossActions({
 
 export default async function LossesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
-  const [settings, allExpenses, profiles, currentProfile] = await Promise.all([
+  const page = Number(params.page ?? 1);
+  const [settings, profiles, currentProfile] = await Promise.all([
     getSettings(),
-    getExpenses(),
     getProfiles(),
     getCurrentProfile()
   ]);
 
-  const visibleExpenses =
-    currentProfile.role === "employee"
-      ? allExpenses.filter((expense) => expense.paid_by === currentProfile.id)
-      : allExpenses;
-  const losses = visibleExpenses.filter((expense) => lossCategories.includes(normalizeLossCategory(expense.category) as (typeof lossCategories)[number]));
-  const scamLosses = losses.filter((expense) => normalizeLossCategory(expense.category) === "scam_account");
-  const refundLosses = losses.filter((expense) => normalizeLossCategory(expense.category) === "refund_account");
+  const lossFilter = {
+    categories: [...lossCategories],
+    paidBy: currentProfile.role === "employee" ? currentProfile.id : null
+  };
+  const [lossPage, totals] = await Promise.all([
+    getExpensesPage({ ...lossFilter, page, pageSize: DEFAULT_PAGE_SIZE, q: params.q }),
+    getExpenseTotals(lossFilter)
+  ]);
+  const losses = lossPage.rows;
   const employees = profiles.filter((profile) => profile.status === "active");
 
-  const totalLoss = losses.reduce((sum, loss) => sum + Number(loss.amount), 0);
-  const scamTotal = scamLosses.reduce((sum, loss) => sum + Number(loss.amount), 0);
-  const refundTotal = refundLosses.reduce((sum, loss) => sum + Number(loss.amount), 0);
+  const totalLoss = totals.total;
+  const scamTotal = Number(totals.byCategory.scam_account ?? 0);
+  const refundTotal = Number(totals.byCategory.refund_account ?? 0);
 
   return (
     <>
@@ -102,7 +104,10 @@ export default async function LossesPage({ searchParams }: { searchParams?: Prom
       <ResponsiveTable
         rows={losses}
         searchQuery={params.q}
-        page={Number(params.page ?? 1)}
+        page={page}
+        pageSize={DEFAULT_PAGE_SIZE}
+        totalRows={lossPage.total}
+        serverSide
         searchPlaceholder="Search all losses..."
         emptyTitle="No losses recorded"
         emptyDescription="Add scam or refund account damage to track it against profit."
