@@ -1,5 +1,6 @@
 import { deleteStockAccount } from "@/app/actions";
 import type React from "react";
+import { AutoSubmitSelect } from "@/components/modules/auto-submit-select";
 import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
@@ -7,8 +8,6 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
-import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockTotals } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
@@ -81,21 +80,6 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
           />
         }
       />
-      <form className="grid gap-3 rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,1fr)_auto]">
-        {params.q ? <input type="hidden" name="q" value={params.q} /> : null}
-        <div className="min-w-0 space-y-2">
-          <label className="text-xs font-medium uppercase text-muted-foreground" htmlFor="stock_sort">
-            Date filter
-          </label>
-          <Select id="stock_sort" name="sort" defaultValue={sort}>
-            <option value="recent">Recent to old</option>
-            <option value="oldest">Old to recent</option>
-          </Select>
-        </div>
-        <Button type="submit" variant="outline" className="self-end">
-          Apply filter
-        </Button>
-      </form>
       <ResponsiveTable
         rows={visibleStockAccounts}
         searchQuery={params.q}
@@ -104,7 +88,17 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
         totalRows={stockPage.total}
         serverSide
         additionalQuery={{ sort }}
+        skipHiddenQueryKeys={["sort"]}
+        toolbarClassName="rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_auto]"
         searchPlaceholder="Search by game, title, secret code, employee..."
+        filters={
+          <div className="min-w-0">
+            <AutoSubmitSelect id="stock_sort" name="sort" defaultValue={sort} aria-label="Date filter">
+              <option value="recent">Recent to old</option>
+              <option value="oldest">Old to recent</option>
+            </AutoSubmitSelect>
+          </div>
+        }
         columns={[
           {
             key: "title",

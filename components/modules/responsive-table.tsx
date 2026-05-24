@@ -1,7 +1,7 @@
 import type React from "react";
 import { Search } from "lucide-react";
+import { AutoSubmitSearchInput } from "@/components/modules/auto-submit-search-input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,10 @@ export function ResponsiveTable<T>({
   paginate = true,
   serverSide = false,
   totalRows,
+  filters,
+  toolbarClassName,
+  searchClassName,
+  skipHiddenQueryKeys = [],
   className
 }: {
   rows: T[];
@@ -42,6 +46,10 @@ export function ResponsiveTable<T>({
   paginate?: boolean;
   serverSide?: boolean;
   totalRows?: number;
+  filters?: React.ReactNode;
+  toolbarClassName?: string;
+  searchClassName?: string;
+  skipHiddenQueryKeys?: string[];
   className?: string;
 }) {
   const q = searchQuery.trim().toLowerCase();
@@ -79,21 +87,22 @@ export function ResponsiveTable<T>({
 
   return (
     <div className={cn("min-w-0 space-y-4", className)}>
-      <form className="flex min-w-0 flex-col gap-2 sm:flex-row">
+      <form className={cn("grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]", toolbarClassName)}>
         {Object.entries(additionalQuery).map(([key, value]) =>
-          key !== pageParam && key !== "q" && value !== undefined && value !== null && value !== "" ? (
+          key !== pageParam && key !== "q" && !skipHiddenQueryKeys.includes(key) && value !== undefined && value !== null && value !== "" ? (
             <input key={key} type="hidden" name={key} value={String(value)} />
           ) : null
         )}
-        <div className="relative min-w-0 flex-1">
+        <div className={cn("relative min-w-0", searchClassName)}>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+          <AutoSubmitSearchInput
             name="q"
             defaultValue={searchQuery}
             placeholder={searchPlaceholder}
             className="pl-9"
           />
         </div>
+        {filters}
         <Button type="submit" variant="outline" className="shrink-0">
           Search
         </Button>
