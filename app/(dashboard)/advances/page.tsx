@@ -8,7 +8,7 @@ import { getAdvanceTransactions, getAdvances, getProfiles, getSettings, getStock
 import { getAdvanceBalance } from "@/lib/metrics";
 import { formatDate, money } from "@/lib/utils";
 
-export default async function AdvancesPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function AdvancesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, advances, transactions, profiles, stockAccounts] = await Promise.all([
     getSettings(),
@@ -36,6 +36,7 @@ export default async function AdvancesPage({ searchParams }: { searchParams?: Pr
       <ResponsiveTable
         rows={rows}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search advances..."
         columns={[
           { key: "employee", header: "Employee", cell: (row) => row.employee?.name ?? row.employee_id, searchValue: (row) => row.employee?.name ?? "" },
@@ -60,6 +61,7 @@ export default async function AdvancesPage({ searchParams }: { searchParams?: Pr
       <ResponsiveTable
         rows={transactions}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search fund transactions..."
         columns={[
           { key: "type", header: "Type", cell: (row) => <StatusBadge value={row.type} />, searchValue: (row) => row.type },

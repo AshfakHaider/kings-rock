@@ -31,11 +31,14 @@ import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function EmployeeDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ q?: string; page?: string }>;
 }) {
   const { id } = await params;
+  const query = (await searchParams) ?? {};
   const [
     settings,
     profiles,
@@ -205,6 +208,8 @@ export default async function EmployeeDetailPage({
         <CardContent>
           <ResponsiveTable
             rows={assignedAccounts}
+            searchQuery={query.q}
+            page={Number(query.page ?? 1)}
             searchPlaceholder="Search assigned accounts..."
             emptyTitle="No assigned accounts"
             emptyDescription="This employee has no active assigned accounts."
@@ -238,6 +243,8 @@ export default async function EmployeeDetailPage({
         <CardContent>
           <ResponsiveTable
             rows={sales}
+            searchQuery={query.q}
+            page={Number(query.page ?? 1)}
             searchPlaceholder="Search sell history..."
             emptyTitle="No sales yet"
             emptyDescription="This employee has not sold any accounts yet."
@@ -278,6 +285,8 @@ export default async function EmployeeDetailPage({
         <CardContent>
           <ResponsiveTable
             rows={employeeAdvanceTransactions}
+            searchQuery={query.q}
+            page={Number(query.page ?? 1)}
             searchPlaceholder="Search fund history..."
             emptyTitle="No fund transactions"
             emptyDescription="No advance or fund activity has been recorded for this employee."

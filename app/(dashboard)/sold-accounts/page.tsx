@@ -9,7 +9,7 @@ import { getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
-export default async function SoldAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function SoldAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, allSoldAccounts, currentProfile] = await Promise.all([
     getSettings(),
@@ -43,6 +43,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
         </div>
         <ResponsiveTable
           rows={waitingSoldAccounts}
+          page={Number(params.page ?? 1)}
           searchPlaceholder="Search waiting payments..."
           emptyTitle="No waiting payments"
           emptyDescription="Newly sold accounts will appear here until payment is received."
@@ -80,6 +81,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
         </div>
         <ResponsiveTable
           rows={sourceRows}
+          page={Number(params.page ?? 1)}
           searchPlaceholder="Search sale sources..."
           emptyTitle="No source sales yet"
           emptyDescription="When accounts are sold, source totals will appear here."
@@ -97,6 +99,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
       <ResponsiveTable
         rows={soldAccounts}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search sales by account, employee, buyer, source..."
         columns={[
           {

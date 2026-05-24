@@ -52,7 +52,7 @@ function LossActions({
   );
 }
 
-export default async function LossesPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function LossesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, allExpenses, profiles, currentProfile] = await Promise.all([
     getSettings(),
@@ -102,6 +102,7 @@ export default async function LossesPage({ searchParams }: { searchParams?: Prom
       <ResponsiveTable
         rows={losses}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search all losses..."
         emptyTitle="No losses recorded"
         emptyDescription="Add scam or refund account damage to track it against profit."

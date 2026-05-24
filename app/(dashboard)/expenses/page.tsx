@@ -9,7 +9,7 @@ import { formatDate, money } from "@/lib/utils";
 
 const lossCategories = new Set(["scam_account", "refund_account"]);
 
-export default async function ExpensesPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function ExpensesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, allExpenses, profiles, currentProfile] = await Promise.all([
     getSettings(),
@@ -47,6 +47,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams?: Pr
       <ResponsiveTable
         rows={expenses}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search expenses..."
         columns={[
           { key: "title", header: "Title", cell: (row) => row.title, searchValue: (row) => row.title },

@@ -4,7 +4,7 @@ import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { getActivityLogs, getCurrentProfile } from "@/lib/data";
 import { formatDate } from "@/lib/utils";
 
-export default async function ActivityLogsPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function ActivityLogsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [logs, currentProfile] = await Promise.all([getActivityLogs(), getCurrentProfile()]);
 
@@ -16,6 +16,7 @@ export default async function ActivityLogsPage({ searchParams }: { searchParams?
       <ResponsiveTable
         rows={logs}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search activity logs..."
         columns={[
           { key: "action", header: "Action", cell: (row) => row.action.replaceAll("_", " "), searchValue: (row) => row.action },

@@ -39,7 +39,7 @@ function inSelectedMonth(dateValue: string, year: number, month: number) {
 export default async function DailyTasksPage({
   searchParams
 }: {
-  searchParams?: Promise<{ month?: string; year?: string; q?: string }>;
+  searchParams?: Promise<{ month?: string; year?: string; q?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const now = new Date();
@@ -146,6 +146,8 @@ export default async function DailyTasksPage({
       <ResponsiveTable
         rows={taskRows}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
+        additionalQuery={{ month: selectedMonth, year: selectedYear }}
         searchPlaceholder="Search daily tasks..."
         emptyTitle="No daily tasks"
         emptyDescription={canManage ? "Create the first daily task for this month." : "No daily tasks have been assigned this month."}
@@ -208,6 +210,8 @@ export default async function DailyTasksPage({
         <>
           <ResponsiveTable
             rows={completionRows}
+            page={Number(params.page ?? 1)}
+            additionalQuery={{ month: selectedMonth, year: selectedYear }}
             searchPlaceholder="Search completion proofs..."
             emptyTitle="No completion proofs"
             emptyDescription="Screenshots will appear after employees complete tasks."
@@ -242,6 +246,8 @@ export default async function DailyTasksPage({
 
           <ResponsiveTable
             rows={employeeRows}
+            page={Number(params.page ?? 1)}
+            additionalQuery={{ month: selectedMonth, year: selectedYear }}
             searchPlaceholder="Search employee completion..."
             emptyTitle="No employee task data"
             emptyDescription="Task completion will appear after employees mark work done."

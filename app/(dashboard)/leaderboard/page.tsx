@@ -31,7 +31,7 @@ function rankLabel(index: number) {
 export default async function LeaderboardPage({
   searchParams
 }: {
-  searchParams?: Promise<{ month?: string; year?: string; q?: string }>;
+  searchParams?: Promise<{ month?: string; year?: string; q?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const now = new Date();
@@ -124,6 +124,8 @@ export default async function LeaderboardPage({
       <ResponsiveTable
         rows={rankedRows}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
+        additionalQuery={{ month: selectedMonth, year: selectedYear }}
         searchPlaceholder="Search leaderboard..."
         emptyTitle="No leaderboard data"
         emptyDescription="No active sellers or sales were found for this month."

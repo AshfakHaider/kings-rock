@@ -59,7 +59,7 @@ function bonusSignal(rank: number, soldCount: number, profit: number, taskComple
 export default async function MonthlyPerformancePage({
   searchParams
 }: {
-  searchParams?: Promise<{ month?: string; year?: string; q?: string }>;
+  searchParams?: Promise<{ month?: string; year?: string; q?: string; page?: string }>;
 }) {
   const params = (await searchParams) ?? {};
   const now = new Date();
@@ -235,6 +235,8 @@ export default async function MonthlyPerformancePage({
       <ResponsiveTable
         rows={rankedRows}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
+        additionalQuery={{ month: selectedMonth, year: selectedYear }}
         searchPlaceholder="Search monthly performance..."
         emptyTitle="No employees found"
         emptyDescription="Add employees and sales to build monthly performance data."

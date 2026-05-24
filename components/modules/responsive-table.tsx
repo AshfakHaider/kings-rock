@@ -20,6 +20,11 @@ export function ResponsiveTable<T>({
   searchPlaceholder = "Search records...",
   emptyTitle = "No records",
   emptyDescription = "Create a new record to get started.",
+  page = 1,
+  pageSize = 50,
+  pageParam = "page",
+  additionalQuery = {},
+  paginate = true,
   className
 }: {
   rows: T[];
@@ -28,6 +33,11 @@ export function ResponsiveTable<T>({
   searchPlaceholder?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  page?: number;
+  pageSize?: number;
+  pageParam?: string;
+  additionalQuery?: Record<string, string | number | undefined | null>;
+  paginate?: boolean;
   className?: string;
 }) {
   const q = searchQuery.trim().toLowerCase();
@@ -40,10 +50,34 @@ export function ResponsiveTable<T>({
         )
       )
     : rows;
+  const totalPages = paginate ? Math.max(1, Math.ceil(visibleRows.length / pageSize)) : 1;
+  const currentPage = paginate ? Math.min(Math.max(1, Number.isFinite(page) ? Math.trunc(page) : 1), totalPages) : 1;
+  const start = paginate ? (currentPage - 1) * pageSize : 0;
+  const pagedRows = paginate ? visibleRows.slice(start, start + pageSize) : visibleRows;
+
+  function pageHref(nextPage: number) {
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(additionalQuery)) {
+      if (key === pageParam || key === "q") continue;
+      if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+    }
+
+    if (searchQuery) params.set("q", searchQuery);
+    if (nextPage > 1) params.set(pageParam, String(nextPage));
+
+    const query = params.toString();
+    return query ? `?${query}` : "?";
+  }
 
   return (
     <div className={cn("min-w-0 space-y-4", className)}>
       <form className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        {Object.entries(additionalQuery).map(([key, value]) =>
+          key !== pageParam && key !== "q" && value !== undefined && value !== null && value !== "" ? (
+            <input key={key} type="hidden" name={key} value={String(value)} />
+          ) : null
+        )}
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -74,7 +108,7 @@ export function ResponsiveTable<T>({
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {visibleRows.map((row, index) => (
+                {pagedRows.map((row, index) => (
                   <tr key={index} className="hover:bg-muted/40">
                     {columns.map((column) => (
                       <td key={column.key} className="max-w-[20rem] px-4 py-3 align-top">
@@ -88,7 +122,7 @@ export function ResponsiveTable<T>({
           </div>
 
           <div className="grid min-w-0 gap-3 md:hidden">
-            {visibleRows.map((row, index) => (
+            {pagedRows.map((row, index) => (
               <Card key={index}>
                 <CardContent className="min-w-0 space-y-3 p-4">
                   {columns.map((column) => (
@@ -103,6 +137,25 @@ export function ResponsiveTable<T>({
               </Card>
             ))}
           </div>
+
+          {paginate && totalPages > 1 ? (
+            <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-muted-foreground">
+                Showing {start + 1}-{Math.min(start + pageSize, visibleRows.length)} of {visibleRows.length}
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <Button asChild variant="outline" size="sm" className={currentPage <= 1 ? "pointer-events-none opacity-50" : ""}>
+                  <a href={pageHref(currentPage - 1)}>Previous</a>
+                </Button>
+                <span className="min-w-20 text-center text-xs font-medium uppercase text-muted-foreground">
+                  Page {currentPage} / {totalPages}
+                </span>
+                <Button asChild variant="outline" size="sm" className={currentPage >= totalPages ? "pointer-events-none opacity-50" : ""}>
+                  <a href={pageHref(currentPage + 1)}>Next</a>
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>

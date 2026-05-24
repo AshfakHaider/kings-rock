@@ -15,7 +15,7 @@ function withoutImages<T extends { image_url?: string | null; image_urls?: strin
   };
 }
 
-export default async function SalesPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function SalesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, stockAccounts, profiles, currentProfile] = await Promise.all([
     getSettings(),
@@ -47,6 +47,7 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
       <ResponsiveTable
         rows={sellableAccounts}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search accounts by code, title, game..."
         emptyTitle="No accounts ready for sale"
         emptyDescription="Add stock accounts first, then every non-sold account will appear here."

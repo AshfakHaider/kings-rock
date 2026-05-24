@@ -37,7 +37,7 @@ function withPrivateNotesForCurrentUser<T extends { assigned_employee_id?: strin
   return { ...account, notes: null };
 }
 
-export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, stockAccounts, profiles, currentProfile] = await Promise.all([
     getSettings(),
@@ -80,6 +80,7 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
       <ResponsiveTable
         rows={visibleStockAccounts}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search by game, title, secret code, employee..."
         columns={[
           {

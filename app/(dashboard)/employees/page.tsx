@@ -9,7 +9,7 @@ import { getAdvanceBalance, getProfit, isPaidSale } from "@/lib/metrics";
 import { money } from "@/lib/utils";
 import Link from "next/link";
 
-export default async function EmployeesPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function EmployeesPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const [settings, profiles, stockAccounts, soldAccounts, advanceTransactions, currentProfile] = await Promise.all([
     getSettings(),
@@ -53,6 +53,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: P
       <ResponsiveTable
         rows={rows}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search employees..."
         columns={[
           {

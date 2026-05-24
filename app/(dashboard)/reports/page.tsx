@@ -122,6 +122,8 @@ export default async function ReportsPage({
         </div>
         <ResponsiveTable
           rows={sourceRows}
+          page={Number(params.page ?? 1)}
+          additionalQuery={params}
           searchPlaceholder="Search sale sources..."
           emptyTitle="No source sales found"
           emptyDescription="Try changing the filters or sell accounts with a source name."
@@ -136,6 +138,8 @@ export default async function ReportsPage({
 
       <ResponsiveTable
         rows={sales}
+        page={Number(params.page ?? 1)}
+        additionalQuery={params}
         searchPlaceholder="Search report sales..."
         columns={[
           { key: "account", header: "Account", cell: (row) => row.stock_account?.account_title ?? "-" },
@@ -153,6 +157,8 @@ export default async function ReportsPage({
 
       <ResponsiveTable
         rows={gmailAccounts}
+        page={Number(params.page ?? 1)}
+        additionalQuery={params}
         searchPlaceholder="Search Gmail report..."
         columns={[
           { key: "email", header: "Email", cell: (row) => row.email },

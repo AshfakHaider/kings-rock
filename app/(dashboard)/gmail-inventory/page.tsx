@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { getGmailAccounts } from "@/lib/data";
 
-export default async function GmailInventoryPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+export default async function GmailInventoryPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
   const params = (await searchParams) ?? {};
   const gmailAccounts = (await getGmailAccounts()).filter((gmail) => gmail.status === "fresh");
 
@@ -17,6 +17,7 @@ export default async function GmailInventoryPage({ searchParams }: { searchParam
       <ResponsiveTable
         rows={gmailAccounts}
         searchQuery={params.q}
+        page={Number(params.page ?? 1)}
         searchPlaceholder="Search Gmail or recovery phone..."
         emptyTitle="No fresh Gmail accounts"
         emptyDescription="Add Gmail accounts here, or mark used accounts will disappear from this list."
