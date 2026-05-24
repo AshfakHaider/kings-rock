@@ -59,6 +59,7 @@ type PageOptions = {
 type StockPageOptions = PageOptions & {
   excludeSold?: boolean;
   assignedEmployeeId?: string | null;
+  sort?: "recent" | "oldest";
 };
 
 type ExpensePageOptions = PageOptions & {
@@ -105,6 +106,19 @@ function inDashboardPeriod(dateValue: string | null | undefined, year: number, m
   if (Number.isNaN(date.getTime())) return false;
   if (date.getFullYear() !== year) return false;
   return month === "all" || date.getMonth() + 1 === month;
+}
+
+function dashboardDateRange(year: number, month: number | "all") {
+  const startMonth = month === "all" ? 0 : month - 1;
+  const endYear = month === "all" ? year + 1 : month === 12 ? year + 1 : year;
+  const endMonth = month === "all" ? 0 : month === 12 ? 0 : month;
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(endYear, endMonth, 1));
+
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10)
+  };
 }
 
 function normalizeSettings(settings: Settings): Settings {
@@ -312,7 +326,7 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
 }
 
 export async function getStockAccountsPage(options: StockPageOptions = {}): Promise<PagedResult<StockAccount>> {
-  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, excludeSold = false, assignedEmployeeId = null } = options;
+  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, excludeSold = false, assignedEmployeeId = null, sort = "recent" } = options;
   const term = searchTerm(options.q);
 
   if (!hasSupabaseEnv()) {
@@ -322,6 +336,10 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
       if (!term) return true;
       const haystack = `${account.game_name} ${account.account_title} ${account.secret_code ?? ""} ${account.status} ${account.assigned_employee?.name ?? ""}`.toLowerCase();
       return haystack.includes(term.toLowerCase());
+    }).sort((a, b) => {
+      const left = new Date(a.created_at).getTime();
+      const right = new Date(b.created_at).getTime();
+      return sort === "oldest" ? left - right : right - left;
     });
     return paginateMemory(rows, page, pageSize);
   }
@@ -338,7 +356,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     query = query.or(`game_name.ilike.%${term}%,account_title.ilike.%${term}%,secret_code.ilike.%${term}%,status.ilike.%${term}%`);
   }
 
-  const { data, count } = await query.order("created_at", { ascending: false }).range(from, to);
+  const { data, count } = await query.order("created_at", { ascending: sort === "oldest" }).range(from, to);
   return {
     rows: (data as unknown as StockAccount[]) ?? [],
     total: count ?? 0
@@ -349,21 +367,29 @@ export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
   if (!hasSupabaseEnv()) {
     const accounts = await getStockAccounts();
     const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
+    const assignedCount = rows.filter((account) => account.status === "assigned" || Boolean(account.assigned_employee_id)).length;
+    const availableCount = rows.filter((account) => account.status === "available" && !account.assigned_employee_id).length;
     return {
-      availableCount: accounts.filter((account) => account.status === "available").length,
+      availableCount,
+      assignedCount,
+      activeCount: availableCount + assignedCount,
       buyingValue: rows.reduce((total, account) => total + Number(account.buying_price), 0),
       sellingValue: rows.reduce((total, account) => total + Number(account.selling_price ?? 0), 0)
     };
   }
 
   const supabase = await createClient();
-  let query = supabase.from("stock_accounts").select("status,buying_price,selling_price");
+  let query = supabase.from("stock_accounts").select("status,buying_price,selling_price,assigned_employee_id");
   if (options.excludeSold) query = query.neq("status", "sold");
   const { data } = await query;
-  const rows = (data as Pick<StockAccount, "status" | "buying_price" | "selling_price">[]) ?? [];
+  const rows = (data as Pick<StockAccount, "status" | "buying_price" | "selling_price" | "assigned_employee_id">[]) ?? [];
+  const assignedCount = rows.filter((account) => account.status === "assigned" || Boolean(account.assigned_employee_id)).length;
+  const availableCount = rows.filter((account) => account.status === "available" && !account.assigned_employee_id).length;
 
   return {
-    availableCount: rows.filter((account) => account.status === "available").length,
+    availableCount,
+    assignedCount,
+    activeCount: availableCount + assignedCount,
     buyingValue: rows.reduce((total, account) => total + Number(account.buying_price), 0),
     sellingValue: rows.reduce((total, account) => total + Number(account.selling_price ?? 0), 0)
   };
@@ -522,6 +548,43 @@ export async function getDashboardWaitingSales(options: DashboardPeriodOptions &
   return ((data as unknown as SoldAccount[]) ?? [])
     .filter((sale) => inDashboardPeriod(sale.sold_date, year, month))
     .slice(0, limit);
+}
+
+export async function getDashboardWaitingPaymentSummary(options: DashboardPeriodOptions) {
+  const { year, month, employeeId = null } = options;
+
+  if (!hasSupabaseEnv()) {
+    const rows = (await getDemoSoldAccounts()).filter((sale) => {
+      if (sale.payment_status === "paid") return false;
+      if (employeeId && sale.employee_id !== employeeId) return false;
+      return inDashboardPeriod(sale.sold_date, year, month);
+    });
+
+    return {
+      count: rows.length,
+      amount: rows.reduce((total, sale) => total + Number(sale.sold_amount), 0)
+    };
+  }
+
+  const supabase = await createClient();
+  const range = dashboardDateRange(year, month);
+  let query = supabase
+    .from("sold_accounts")
+    .select("sold_amount,sold_date")
+    .neq("payment_status", "paid")
+    .gte("sold_date", range.start)
+    .lt("sold_date", range.end)
+    .limit(5000);
+
+  if (employeeId) query = query.eq("employee_id", employeeId);
+
+  const { data } = await query;
+  const rows = (data as Pick<SoldAccount, "sold_amount" | "sold_date">[]) ?? [];
+
+  return {
+    count: rows.length,
+    amount: rows.reduce((total, sale) => total + Number(sale.sold_amount), 0)
+  };
 }
 
 export async function getDashboardExpenseTotal(options: DashboardPeriodOptions & { paidBy?: string | null }) {

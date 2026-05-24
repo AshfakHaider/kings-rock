@@ -7,6 +7,8 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockTotals } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
@@ -37,12 +39,13 @@ function withPrivateNotesForCurrentUser<T extends { assigned_employee_id?: strin
   return { ...account, notes: null };
 }
 
-export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
+export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string; sort?: string }> }) {
   const params = (await searchParams) ?? {};
   const page = Number(params.page ?? 1);
+  const sort = params.sort === "oldest" ? "oldest" : "recent";
   const [settings, stockPage, stockTotals, profiles, currentProfile] = await Promise.all([
     getSettings(),
-    getStockAccountsPage({ page, pageSize: DEFAULT_PAGE_SIZE, q: params.q, excludeSold: true }),
+    getStockAccountsPage({ page, pageSize: DEFAULT_PAGE_SIZE, q: params.q, excludeSold: true, sort }),
     getStockTotals({ excludeSold: true }),
     getProfiles(),
     getCurrentProfile()
@@ -52,8 +55,11 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
   const canViewBuyingPrice = currentProfile.role !== "employee";
   const canManageStockRecords = currentProfile.role !== "employee";
   const totalAvailable = stockTotals.availableCount;
+  const totalAssigned = stockTotals.assignedCount;
+  const totalActive = stockTotals.activeCount;
   const stockValue = stockTotals.buyingValue;
   const stockSellingValue = stockTotals.sellingValue;
+  const stockSummary = `${totalAvailable} available, ${totalAssigned} assigned, ${totalActive} total available + assigned.`;
   type StockRow = (typeof visibleStockAccounts)[number];
 
   return (
@@ -62,8 +68,8 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
         title="Stock Accounts"
         description={
           canViewBuyingPrice
-            ? `${totalAvailable} available accounts. Buying value ${money(stockValue, settings.currency)}. Selling value ${money(stockSellingValue, settings.currency)}.`
-            : `${totalAvailable} available accounts. Selling value ${money(stockSellingValue, settings.currency)}.`
+            ? `${stockSummary} Buying value ${money(stockValue, settings.currency)}. Selling value ${money(stockSellingValue, settings.currency)}.`
+            : `${stockSummary} Selling value ${money(stockSellingValue, settings.currency)}.`
         }
         action={
           <StockAccountModal
@@ -75,6 +81,21 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
           />
         }
       />
+      <form className="grid gap-3 rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,1fr)_auto]">
+        {params.q ? <input type="hidden" name="q" value={params.q} /> : null}
+        <div className="min-w-0 space-y-2">
+          <label className="text-xs font-medium uppercase text-muted-foreground" htmlFor="stock_sort">
+            Date filter
+          </label>
+          <Select id="stock_sort" name="sort" defaultValue={sort}>
+            <option value="recent">Recent to old</option>
+            <option value="oldest">Old to recent</option>
+          </Select>
+        </div>
+        <Button type="submit" variant="outline" className="self-end">
+          Apply filter
+        </Button>
+      </form>
       <ResponsiveTable
         rows={visibleStockAccounts}
         searchQuery={params.q}
@@ -82,6 +103,7 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
         pageSize={DEFAULT_PAGE_SIZE}
         totalRows={stockPage.total}
         serverSide
+        additionalQuery={{ sort }}
         searchPlaceholder="Search by game, title, secret code, employee..."
         columns={[
           {

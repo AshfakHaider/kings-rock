@@ -20,13 +20,15 @@ import {
   getDashboardExpenseTotal,
   getDashboardPaidSales,
   getDashboardSnapshot,
-  getDashboardWaitingSales,
+  getDashboardWaitingPaymentSummary,
   getStockTotals,
   getStockValueByGameSummary
 } from "@/lib/data";
 import { employeeProfitSeries, getProfit, saleCashDate, salesBySource } from "@/lib/metrics";
 import type { SoldAccount } from "@/lib/types";
-import { formatDate, money } from "@/lib/utils";
+import { money } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 const monthNames = [
   "January",
@@ -91,14 +93,14 @@ export default async function DashboardPage({
     currentStockValueByGame,
     filteredPaidSales,
     selectedYearPaidSales,
-    filteredWaitingPayments,
+    waitingPaymentSummary,
     filteredExpenseAmount
   ] = await Promise.all([
     getStockTotals({ excludeSold: true }),
     getStockValueByGameSummary(),
     getDashboardPaidSales({ year: selectedYear, month: selectedMonth, employeeId }),
     getDashboardPaidSales({ year: selectedYear, month: "all", employeeId }),
-    getDashboardWaitingSales({ year: selectedYear, month: selectedMonth, employeeId, limit: 8 }),
+    getDashboardWaitingPaymentSummary({ year: selectedYear, month: selectedMonth, employeeId }),
     getDashboardExpenseTotal({ year: selectedYear, month: selectedMonth, paidBy: employeeId })
   ]);
 
@@ -107,7 +109,7 @@ export default async function DashboardPage({
   const filteredSalesAmount = filteredPaidSales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
   const filteredBuyingCost = filteredPaidSales.reduce((total, sale) => total + Number(sale.stock_account?.buying_price ?? 0), 0);
   const filteredGrossProfit = filteredSalesAmount - filteredBuyingCost;
-  const filteredWaitingAmount = filteredWaitingPayments.reduce((total, sale) => total + Number(sale.sold_amount), 0);
+  const filteredWaitingAmount = waitingPaymentSummary.amount;
   const selectedYearProfit = selectedYearPaidSales.reduce((total, sale) => total + getProfit(sale), 0);
   const sourceRows = canViewFinancials ? salesBySource(filteredPaidSales).slice(0, 5) : [];
   const yearOptions = Array.from(
@@ -192,7 +194,7 @@ export default async function DashboardPage({
         />
         <StatCard
           title={`Waiting payments (${periodLabel})`}
-          value={String(filteredWaitingPayments.length)}
+          value={String(waitingPaymentSummary.count)}
           icon={Clock3}
           tone="warn"
         />
@@ -252,35 +254,17 @@ export default async function DashboardPage({
       </section>
 
       <section className="space-y-3">
-        <div>
-          <h2 className="text-lg font-semibold">Waiting For Payment</h2>
-          <p className="text-sm text-muted-foreground">
-            Accounts sold in {periodLabel}, but the platform payment has not been received yet.
-          </p>
+        <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-soft sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Waiting For Payment</h2>
+            <p className="text-sm text-muted-foreground">
+              {waitingPaymentSummary.count} accounts are waiting for platform payout in {periodLabel}.
+            </p>
+          </div>
+          <Button asChild variant="outline" className="w-full sm:w-auto">
+            <Link href="/sold-accounts">View</Link>
+          </Button>
         </div>
-        <ResponsiveTable
-          rows={filteredWaitingPayments}
-          searchPlaceholder="Search waiting payments..."
-          emptyTitle="No waiting payments"
-          emptyDescription="When a sold account is waiting for platform payout, it will appear here."
-          columns={[
-            {
-              key: "account",
-              header: "Account",
-              cell: (row) => row.stock_account?.account_title ?? row.stock_account_id,
-              searchValue: (row) => `${row.stock_account?.secret_code ?? ""} ${row.stock_account?.account_title ?? ""}`
-            },
-            {
-              key: "employee",
-              header: "Sold by",
-              cell: (row) => row.employee?.name ?? row.employee_id,
-              searchValue: (row) => row.employee?.name ?? row.employee_id
-            },
-            { key: "amount", header: "Amount", cell: (row) => money(row.sold_amount, snapshot.currency) },
-            { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
-            { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) }
-          ]}
-        />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
