@@ -98,6 +98,7 @@ export function ResponsiveTable<T>({
           <AutoSubmitSearchInput
             name="q"
             defaultValue={searchQuery}
+            pageParam={pageParam}
             placeholder={searchPlaceholder}
             className="pl-9"
           />
