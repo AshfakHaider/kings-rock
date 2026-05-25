@@ -44,6 +44,8 @@ import {
 import { normalizeCurrency } from "@/lib/utils";
 
 export const DEFAULT_PAGE_SIZE = 50;
+const STOCK_ACCOUNT_LIST_SELECT =
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
 
 type PagedResult<T> = {
   rows: T[];
@@ -122,8 +124,11 @@ function stockMatchesSearch(account: StockAccount, term: string) {
   const haystack = [
     account.game_name,
     account.account_title,
+    account.account_details,
+    account.purchase_source,
     account.secret_code,
     account.status,
+    account.notes,
     account.assigned_employee?.name,
     account.assigned_employee?.email
   ]
@@ -407,7 +412,7 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("stock_accounts")
-    .select("id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)")
+    .select(STOCK_ACCOUNT_LIST_SELECT)
     .order("created_at", { ascending: false });
   return (data as unknown as StockAccount[]) ?? [];
 }
@@ -434,14 +439,32 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
   const { from, to } = pageRange(page, pageSize);
   let query = supabase
     .from("stock_accounts")
-    .select("id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)", { count: "exact" });
+    .select(STOCK_ACCOUNT_LIST_SELECT, { count: "exact" });
 
   if (excludeSold) query = query.neq("status", "sold");
   if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
   if (term) {
-    const { data } = await query.order("created_at", { ascending: sort === "oldest" }).limit(10000);
-    const rows = ((data as unknown as StockAccount[]) ?? []).filter((account) => stockMatchesSearch(account, term));
-    return paginateMemory(rows, page, pageSize);
+    const rows: StockAccount[] = [];
+    const batchSize = 1000;
+    let offset = 0;
+
+    while (offset < 20000) {
+      let searchQuery = supabase.from("stock_accounts").select(STOCK_ACCOUNT_LIST_SELECT);
+      if (excludeSold) searchQuery = searchQuery.neq("status", "sold");
+      if (assignedEmployeeId) searchQuery = searchQuery.eq("assigned_employee_id", assignedEmployeeId);
+
+      const { data } = await searchQuery
+        .order("created_at", { ascending: sort === "oldest" })
+        .range(offset, offset + batchSize - 1);
+      const batch = (data as unknown as StockAccount[]) ?? [];
+
+      rows.push(...batch);
+      if (batch.length < batchSize) break;
+      offset += batchSize;
+    }
+
+    const matchedRows = rows.filter((account) => stockMatchesSearch(account, term));
+    return paginateMemory(matchedRows, page, pageSize);
   }
 
   const { data, count } = await query.order("created_at", { ascending: sort === "oldest" }).range(from, to);
