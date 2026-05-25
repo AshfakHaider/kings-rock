@@ -655,14 +655,31 @@ export async function getDashboardSourceSales(options: { employeeId?: string | n
   const supabase = await createClient();
   let query = supabase
     .from("sold_accounts")
-    .select("id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at,stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
+    .select("*, stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
     .order("sold_date", { ascending: false })
     .limit(5000);
 
   if (employeeId) query = query.eq("employee_id", employeeId);
 
-  const { data } = await query;
-  return (data as unknown as SoldAccount[]) ?? [];
+  const { data, error } = await query;
+  if (!error) return (data as unknown as SoldAccount[]) ?? [];
+
+  let fallbackQuery = supabase
+    .from("sold_accounts")
+    .select("id,stock_account_id,employee_id,sold_amount,sold_source_website,payment_status,sold_date,created_at")
+    .order("sold_date", { ascending: false })
+    .limit(5000);
+
+  if (employeeId) fallbackQuery = fallbackQuery.eq("employee_id", employeeId);
+
+  const { data: fallbackData } = await fallbackQuery;
+  const fallbackSales = ((fallbackData as unknown as SoldAccount[]) ?? []).map((sale) => ({
+    ...sale,
+    stock_account: null,
+    employee: null
+  }));
+
+  return fallbackSales;
 }
 
 export async function getDashboardWaitingSales(options: DashboardPeriodOptions & { limit?: number }): Promise<SoldAccount[]> {

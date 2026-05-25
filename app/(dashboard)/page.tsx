@@ -88,7 +88,9 @@ function dashboardSalesBySource(sales: SoldAccount[]) {
     item.soldCount += 1;
     if (isPaidSale(sale)) {
       item.totalSales += Number(sale.sold_amount);
-      item.profit += getProfit(sale);
+      if (sale.stock_account?.buying_price != null) {
+        item.profit += getProfit(sale);
+      }
     }
     buckets.set(key, item);
   }
