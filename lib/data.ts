@@ -439,26 +439,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
   if (excludeSold) query = query.neq("status", "sold");
   if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
   if (term) {
-    const compactTerm = compactSearchTerm(term);
-    const pieces = searchPieces(term);
-    const employeeIds = await getProfileIdsMatchingTerm(supabase, term);
-    const conditions = [
-      `game_name.ilike.%${term}%`,
-      `account_title.ilike.%${term}%`,
-      `secret_code.ilike.%${term}%`,
-      `status.ilike.%${term}%`,
-      inFilter("assigned_employee_id", employeeIds)
-    ].filter(Boolean);
-
-    if (compactTerm && compactTerm !== term) conditions.push(`secret_code.ilike.%${compactTerm}%`);
-    for (const piece of pieces) {
-      conditions.push(`game_name.ilike.%${piece}%`);
-      conditions.push(`account_title.ilike.%${piece}%`);
-      conditions.push(`secret_code.ilike.%${piece}%`);
-    }
-
-    query = query.or(conditions.join(","));
-    const { data } = await query.order("created_at", { ascending: sort === "oldest" }).limit(5000);
+    const { data } = await query.order("created_at", { ascending: sort === "oldest" }).limit(10000);
     const rows = ((data as unknown as StockAccount[]) ?? []).filter((account) => stockMatchesSearch(account, term));
     return paginateMemory(rows, page, pageSize);
   }
