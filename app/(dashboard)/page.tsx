@@ -20,11 +20,12 @@ import {
   getDashboardExpenseTotal,
   getDashboardPaidSales,
   getDashboardSnapshot,
+  getDashboardSourceSales,
   getDashboardWaitingPaymentSummary,
   getStockTotals,
   getStockValueByGameSummary
 } from "@/lib/data";
-import { employeeProfitSeries, getProfit, saleCashDate, salesBySource } from "@/lib/metrics";
+import { employeeProfitSeries, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
 import type { SoldAccount } from "@/lib/types";
 import { money } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,30 @@ function buildMonthlySeriesForYear(sales: SoldAccount[], year: number) {
   });
 }
 
+function dashboardSalesBySource(sales: SoldAccount[]) {
+  const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
+
+  for (const sale of sales) {
+    const source = sale.sold_source_website?.trim() || "Unknown";
+    const key = source.toLowerCase();
+    const item = buckets.get(key) ?? {
+      source,
+      soldCount: 0,
+      totalSales: 0,
+      profit: 0
+    };
+
+    item.soldCount += 1;
+    if (isPaidSale(sale)) {
+      item.totalSales += Number(sale.sold_amount);
+      item.profit += getProfit(sale);
+    }
+    buckets.set(key, item);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => b.soldCount - a.soldCount || b.totalSales - a.totalSales);
+}
+
 export default async function DashboardPage({
   searchParams
 }: {
@@ -93,6 +118,7 @@ export default async function DashboardPage({
     currentStockValueByGame,
     filteredPaidSales,
     selectedYearPaidSales,
+    sourceSales,
     waitingPaymentSummary,
     filteredExpenseAmount
   ] = await Promise.all([
@@ -100,6 +126,7 @@ export default async function DashboardPage({
     getStockValueByGameSummary(),
     getDashboardPaidSales({ year: selectedYear, month: selectedMonth, employeeId }),
     getDashboardPaidSales({ year: selectedYear, month: "all", employeeId }),
+    getDashboardSourceSales({ employeeId }),
     getDashboardWaitingPaymentSummary({ year: selectedYear, month: selectedMonth, employeeId }),
     getDashboardExpenseTotal({ year: selectedYear, month: selectedMonth, paidBy: employeeId })
   ]);
@@ -111,7 +138,7 @@ export default async function DashboardPage({
   const filteredGrossProfit = filteredSalesAmount - filteredBuyingCost;
   const filteredWaitingAmount = waitingPaymentSummary.amount;
   const selectedYearProfit = selectedYearPaidSales.reduce((total, sale) => total + getProfit(sale), 0);
-  const sourceRows = canViewFinancials ? salesBySource(filteredPaidSales).slice(0, 5) : [];
+  const sourceRows = canViewFinancials ? dashboardSalesBySource(sourceSales).slice(0, 5) : [];
   const yearOptions = Array.from(
     new Set([
       now.getFullYear(),
@@ -302,7 +329,9 @@ export default async function DashboardPage({
         <section className="space-y-3">
           <div>
             <h2 className="text-lg font-semibold">Best sale sources</h2>
-            <p className="text-sm text-muted-foreground">Top sources by accounts sold in {periodLabel}.</p>
+            <p className="text-sm text-muted-foreground">
+              Top sources by all sold accounts. Sales and profit count paid payments only.
+            </p>
           </div>
           <ResponsiveTable
             rows={sourceRows}

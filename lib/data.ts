@@ -645,6 +645,26 @@ export async function getDashboardPaidSales(options: DashboardPeriodOptions): Pr
   );
 }
 
+export async function getDashboardSourceSales(options: { employeeId?: string | null } = {}): Promise<SoldAccount[]> {
+  const { employeeId = null } = options;
+
+  if (!hasSupabaseEnv()) {
+    return (await getDemoSoldAccounts()).filter((sale) => !employeeId || sale.employee_id === employeeId);
+  }
+
+  const supabase = await createClient();
+  let query = supabase
+    .from("sold_accounts")
+    .select("id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at,stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
+    .order("sold_date", { ascending: false })
+    .limit(5000);
+
+  if (employeeId) query = query.eq("employee_id", employeeId);
+
+  const { data } = await query;
+  return (data as unknown as SoldAccount[]) ?? [];
+}
+
 export async function getDashboardWaitingSales(options: DashboardPeriodOptions & { limit?: number }): Promise<SoldAccount[]> {
   const { year, month, employeeId = null, limit = 8 } = options;
 
