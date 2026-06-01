@@ -4,7 +4,6 @@ import {
   CalendarDays,
   ChartNoAxesCombined,
   Clock3,
-  Mail,
   ReceiptText,
   ShoppingCart,
   TrendingUp,
@@ -162,8 +161,8 @@ export default async function DashboardPage({
         title="Dashboard"
         description={
           canViewFinancials
-            ? "Live business overview for stock, sales, profit, Gmail inventory, and employee funds."
-            : "Your assigned sales overview, Gmail inventory, and employee funds."
+            ? "Live business overview for stock, sales, profit, waiting payments, and employee funds."
+            : "Your assigned sales overview, waiting payments, and employee funds."
         }
       />
 
@@ -274,7 +273,6 @@ export default async function DashboardPage({
             />
           </>
         ) : null}
-        <StatCard title="Available Gmail" value={String(metrics.availableGmailCount)} icon={Mail} />
         <StatCard
           title="Employee advance balance"
           value={money(metrics.employeeAdvanceBalance, snapshot.currency)}
