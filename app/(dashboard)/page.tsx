@@ -50,7 +50,7 @@ function safeYear(value: string | undefined, fallback: number) {
   return Number.isInteger(year) && year >= 2020 && year <= 2100 ? year : fallback;
 }
 
-function safeMonth(value: string | undefined, fallback: number) {
+function safeMonth(value: string | undefined, fallback: number | "all") {
   if (value === "all") return "all" as const;
   const month = Number(value);
   return Number.isInteger(month) && month >= 1 && month <= 12 ? month : fallback;
@@ -105,7 +105,7 @@ export default async function DashboardPage({
   const params = (await searchParams) ?? {};
   const now = new Date();
   const selectedYear = safeYear(params.year, now.getFullYear());
-  const selectedMonth = safeMonth(params.month, now.getMonth() + 1);
+  const selectedMonth = safeMonth(params.month, "all" as const);
   const [snapshot, currentProfile] = await Promise.all([
     getDashboardSnapshot(),
     getCurrentProfile()
