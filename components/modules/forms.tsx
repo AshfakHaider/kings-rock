@@ -13,18 +13,30 @@ function Field({
   name,
   type = "text",
   defaultValue,
-  required
+  required,
+  step,
+  inputMode
 }: {
   label: string;
   name: string;
   type?: string;
   defaultValue?: string | number | null;
   required?: boolean;
+  step?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
 }) {
   return (
     <div className="space-y-2">
       <Label htmlFor={name}>{label}</Label>
-      <Input id={name} name={name} type={type} defaultValue={defaultValue ?? ""} required={required} />
+      <Input
+        id={name}
+        name={name}
+        type={type}
+        step={step}
+        inputMode={inputMode}
+        defaultValue={defaultValue ?? ""}
+        required={required}
+      />
     </div>
   );
 }
@@ -83,7 +95,7 @@ export function StockForm({
       <Field label="Game name" name="game_name" defaultValue={stock?.game_name} required />
       <Field label="Account title" name="account_title" defaultValue={stock?.account_title} required />
       <Field label="Purchase source" name="purchase_source" defaultValue={stock?.purchase_source} />
-      <Field label="Buying price" name="buying_price" type="number" defaultValue={stock?.buying_price} required />
+      <Field label="Buying price" name="buying_price" type="number" step="0.01" inputMode="decimal" defaultValue={stock?.buying_price} required />
       <Field label="Purchase date" name="purchase_date" type="date" defaultValue={stock?.purchase_date} required />
       <div className="space-y-2">
         <Label>Status</Label>
@@ -143,7 +155,7 @@ export function SaleForm({
           ))}
         </Select>
       </div>
-      <Field label="Sold amount" name="sold_amount" type="number" required />
+      <Field label="Sold amount" name="sold_amount" type="number" step="0.01" inputMode="decimal" required />
       <Field label="Source website" name="sold_source_website" />
       <Field label="Buyer contact" name="buyer_contact" />
       <Field label="Payment method" name="payment_method" />
@@ -215,7 +227,7 @@ export function AdvanceForm({ employees }: { employees: Profile[] }) {
           ))}
         </Select>
       </div>
-      <Field label="Amount given" name="amount_given" type="number" required />
+      <Field label="Amount given" name="amount_given" type="number" step="0.01" inputMode="decimal" required />
       <Field label="Date given" name="date_given" type="date" required />
       <Field label="Purpose" name="purpose" />
       <Field label="Payment method" name="payment_method" />
@@ -266,7 +278,7 @@ export function AdvanceTransactionForm({
           ))}
         </Select>
       </div>
-      <Field label="Amount" name="amount" type="number" required />
+      <Field label="Amount" name="amount" type="number" step="0.01" inputMode="decimal" required />
       <div className="space-y-2">
         <Label>Stock account</Label>
         <Select name="stock_account_id">
@@ -287,7 +299,7 @@ export function ExpenseForm({ employees }: { employees: Profile[] }) {
   return (
     <form action={saveExpense} className="grid gap-4 md:grid-cols-2">
       <Field label="Title" name="title" required />
-      <Field label="Amount" name="amount" type="number" required />
+      <Field label="Amount" name="amount" type="number" step="0.01" inputMode="decimal" required />
       <Field label="Expense date" name="expense_date" type="date" required />
       <div className="space-y-2">
         <Label>Category</Label>

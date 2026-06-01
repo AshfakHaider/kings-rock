@@ -73,6 +73,8 @@ export function MarkSoldModal({
                   name="sold_amount"
                   type="number"
                   min="0"
+                  step="0.01"
+                  inputMode="decimal"
                   required
                   defaultValue={account.selling_price ?? ""}
                   placeholder="16800"

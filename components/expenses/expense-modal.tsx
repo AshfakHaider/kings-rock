@@ -92,7 +92,7 @@ export function ExpenseModal({
 
               <div className="space-y-2">
                 <Label htmlFor="expense_amount">Amount</Label>
-                <Input id="expense_amount" name="amount" type="number" min="0" required placeholder="1200" defaultValue={expense?.amount ?? ""} />
+                <Input id="expense_amount" name="amount" type="number" min="0" step="0.01" inputMode="decimal" required placeholder="1200" defaultValue={expense?.amount ?? ""} />
               </div>
 
               <div className="space-y-2">

@@ -244,13 +244,13 @@ export function StockAccountModal({
               {canViewBuyingPrice ? (
                 <div className="space-y-2">
                   <Label htmlFor="buying_price">Buying price</Label>
-                  <Input id="buying_price" name="buying_price" type="number" min="0" required placeholder="12000" defaultValue={stock?.buying_price ?? ""} autoComplete="off" />
+                  <Input id="buying_price" name="buying_price" type="number" min="0" step="0.01" inputMode="decimal" required placeholder="12000" defaultValue={stock?.buying_price ?? ""} autoComplete="off" />
                 </div>
               ) : null}
 
               <div className="space-y-2">
                 <Label htmlFor="selling_price">Selling price</Label>
-                <Input id="selling_price" name="selling_price" type="number" min="0" required placeholder="16800" defaultValue={stock?.selling_price ?? ""} autoComplete="off" />
+                <Input id="selling_price" name="selling_price" type="number" min="0" step="0.01" inputMode="decimal" required placeholder="16800" defaultValue={stock?.selling_price ?? ""} autoComplete="off" />
               </div>
 
               <div className="space-y-2">
