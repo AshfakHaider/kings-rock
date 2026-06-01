@@ -16,16 +16,14 @@ import { StatCard } from "@/components/modules/stat-card";
 import { Select } from "@/components/ui/select";
 import {
   getCurrentProfile,
-  getDashboardExpenseTotal,
-  getDashboardPaidSales,
   getDashboardSnapshot,
-  getDashboardSourceSales,
-  getDashboardWaitingPaymentSummary,
+  getExpenses,
+  getSoldAccounts,
   getStockTotals,
   getStockValueByGameSummary
 } from "@/lib/data";
 import { employeeProfitSeries, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
-import type { SoldAccount } from "@/lib/types";
+import type { Expense, SoldAccount } from "@/lib/types";
 import { money } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -54,6 +52,14 @@ function safeMonth(value: string | undefined, fallback: number | "all") {
   if (value === "all") return "all" as const;
   const month = Number(value);
   return Number.isInteger(month) && month >= 1 && month <= 12 ? month : fallback;
+}
+
+function inSelectedPeriod(dateValue: string | null | undefined, year: number, month: number | "all") {
+  if (!dateValue) return false;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+  if (date.getFullYear() !== year) return false;
+  return month === "all" || date.getMonth() + 1 === month;
 }
 
 function buildMonthlySeriesForYear(sales: SoldAccount[], year: number) {
@@ -105,7 +111,7 @@ export default async function DashboardPage({
   const params = (await searchParams) ?? {};
   const now = new Date();
   const selectedYear = safeYear(params.year, now.getFullYear());
-  const selectedMonth = safeMonth(params.month, "all" as const);
+  const selectedMonth = safeMonth(params.month, now.getMonth() + 1);
   const [snapshot, currentProfile] = await Promise.all([
     getDashboardSnapshot(),
     getCurrentProfile()
@@ -117,20 +123,37 @@ export default async function DashboardPage({
   const [
     stockTotals,
     currentStockValueByGame,
-    filteredPaidSales,
-    selectedYearPaidSales,
-    sourceSales,
-    waitingPaymentSummary,
-    filteredExpenseAmount
+    soldAccounts,
+    expenses
   ] = await Promise.all([
     getStockTotals({ excludeSold: true }),
     getStockValueByGameSummary(),
-    getDashboardPaidSales({ year: selectedYear, month: selectedMonth, employeeId }),
-    getDashboardPaidSales({ year: selectedYear, month: "all", employeeId }),
-    getDashboardSourceSales({ employeeId }),
-    getDashboardWaitingPaymentSummary({ year: selectedYear, month: selectedMonth, employeeId }),
-    getDashboardExpenseTotal({ year: selectedYear, month: selectedMonth, paidBy: employeeId })
+    getSoldAccounts(),
+    getExpenses()
   ]);
+
+  const visibleSoldAccounts = employeeId
+    ? soldAccounts.filter((sale) => sale.employee_id === employeeId)
+    : soldAccounts;
+  const visibleExpenses = employeeId
+    ? expenses.filter((expense) => expense.paid_by === employeeId)
+    : expenses;
+  const filteredPaidSales = visibleSoldAccounts.filter(
+    (sale) => isPaidSale(sale) && inSelectedPeriod(saleCashDate(sale), selectedYear, selectedMonth)
+  );
+  const selectedYearPaidSales = visibleSoldAccounts.filter(
+    (sale) => isPaidSale(sale) && inSelectedPeriod(saleCashDate(sale), selectedYear, "all")
+  );
+  const filteredWaitingSales = visibleSoldAccounts.filter(
+    (sale) => !isPaidSale(sale) && inSelectedPeriod(sale.sold_date, selectedYear, selectedMonth)
+  );
+  const filteredExpenseAmount = visibleExpenses
+    .filter((expense: Expense) => inSelectedPeriod(expense.expense_date, selectedYear, selectedMonth))
+    .reduce((total, expense) => total + Number(expense.amount), 0);
+  const waitingPaymentSummary = {
+    count: filteredWaitingSales.length,
+    amount: filteredWaitingSales.reduce((total, sale) => total + Number(sale.sold_amount), 0)
+  };
 
   const totalStockBuyingValue = stockTotals.buyingValue;
   const totalStockSellingValue = stockTotals.sellingValue;
@@ -139,7 +162,7 @@ export default async function DashboardPage({
   const filteredGrossProfit = filteredSalesAmount - filteredBuyingCost;
   const filteredWaitingAmount = waitingPaymentSummary.amount;
   const selectedYearProfit = selectedYearPaidSales.reduce((total, sale) => total + getProfit(sale), 0);
-  const sourceRows = canViewFinancials ? dashboardSalesBySource(sourceSales).slice(0, 5) : [];
+  const sourceRows = canViewFinancials ? dashboardSalesBySource(visibleSoldAccounts).slice(0, 5) : [];
   const yearOptions = Array.from(
     new Set([
       now.getFullYear(),
