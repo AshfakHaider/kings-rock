@@ -6,8 +6,8 @@ import { createBrowserClient } from "@supabase/ssr";
 import { KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 
 export function ResetPasswordForm() {
   const [message, setMessage] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export function ResetPasswordForm() {
           <form action={submit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
-              <Input id="password" name="password" type="password" minLength={6} required />
+              <PasswordInput id="password" name="password" minLength={6} required />
             </div>
             {error ? (
               <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">

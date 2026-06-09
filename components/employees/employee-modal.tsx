@@ -7,6 +7,7 @@ import { saveEmployee } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -64,10 +65,9 @@ export function EmployeeModal() {
 
               <div className="space-y-2">
                 <Label htmlFor="employee_password">Login password</Label>
-                <Input
+                <PasswordInput
                   id="employee_password"
                   name="password"
-                  type="password"
                   minLength={6}
                   required
                   placeholder="Minimum 6 characters"
