@@ -11,7 +11,7 @@ import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { compressImageFiles } from "@/lib/client-image-compression";
-import { createZipBlob, downloadBlob } from "@/lib/client-zip";
+import { downloadBlob } from "@/lib/client-zip";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
 
@@ -34,6 +34,10 @@ function filenameSafe(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48) || "stock-account";
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export function StockAccountModal({
@@ -134,16 +138,12 @@ export function StockAccountModal({
     setImageDownloadPending(true);
 
     try {
-      const zipBlob = await createZipBlob(
-        selectedImages.map((image, index) => {
-          const extension = image.file.name.split(".").pop()?.toLowerCase() || "jpg";
-          return {
-            name: `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`,
-            blob: image.file
-          };
-        })
-      );
-      downloadBlob(zipBlob, `${baseName}-images.zip`);
+      for (const [index, image] of selectedImages.entries()) {
+        const extension = image.file.name.split(".").pop()?.toLowerCase() || "jpg";
+        downloadBlob(image.file, `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`);
+        await wait(150);
+      }
+      setNotice(`Started ${selectedImages.length} image downloads. Your browser may ask to allow multiple downloads.`);
     } catch {
       setNotice("Could not prepare image download. Please try again.");
     } finally {

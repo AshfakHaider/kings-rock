@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Download, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NoticeToast } from "@/components/ui/notice-toast";
-import { createZipBlob, downloadBlob } from "@/lib/client-zip";
+import { downloadBlob } from "@/lib/client-zip";
 import { cn } from "@/lib/utils";
 
 function imageExtension(url: string) {
@@ -23,6 +23,10 @@ function filenameSafe(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48) || "stock-account";
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export function StockImageGallery({
@@ -44,20 +48,15 @@ export function StockImageGallery({
     setNotice(null);
 
     try {
-      const files = await Promise.all(
-        images.map(async (image, index) => {
-          const response = await fetch(image);
-          if (!response.ok) throw new Error("Image download failed.");
-          const blob = await response.blob();
-          const extension = imageExtension(image);
-          return {
-            name: `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`,
-            blob
-          };
-        })
-      );
-      const zipBlob = await createZipBlob(files);
-      downloadBlob(zipBlob, `${baseName}-images.zip`);
+      for (const [index, image] of images.entries()) {
+        const response = await fetch(image);
+        if (!response.ok) throw new Error("Image download failed.");
+        const blob = await response.blob();
+        const extension = imageExtension(image);
+        downloadBlob(blob, `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`);
+        await wait(150);
+      }
+      setNotice(`Started ${images.length} image downloads. Your browser may ask to allow multiple downloads.`);
     } catch {
       setNotice("Could not download all images. Please try again or download images one by one.");
     } finally {
