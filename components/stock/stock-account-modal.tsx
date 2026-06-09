@@ -10,8 +10,8 @@ import { Label } from "@/components/ui/label";
 import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { downloadBlob } from "@/lib/client-download";
 import { compressImageFiles } from "@/lib/client-image-compression";
-import { downloadBlob } from "@/lib/client-zip";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
 

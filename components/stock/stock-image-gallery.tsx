@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Download, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NoticeToast } from "@/components/ui/notice-toast";
-import { downloadBlob } from "@/lib/client-zip";
+import { downloadBlob } from "@/lib/client-download";
 import { cn } from "@/lib/utils";
 
 function imageExtension(url: string) {
