@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Download, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NoticeToast } from "@/components/ui/notice-toast";
@@ -86,9 +87,13 @@ export function StockImageGallery({
       </div>
 
       <div className="aspect-video bg-muted">
-        <img
+        <Image
           src={activeImage}
           alt={`${title} image ${activeIndex + 1}`}
+          width={1200}
+          height={675}
+          priority={activeIndex === 0}
+          unoptimized
           className="h-full w-full object-contain"
         />
       </div>
@@ -107,9 +112,12 @@ export function StockImageGallery({
               aria-label={`Show image ${index + 1}`}
               aria-pressed={activeIndex === index}
             >
-              <img
+              <Image
                 src={image}
                 alt={`${title} thumbnail ${index + 1}`}
+                width={160}
+                height={160}
+                unoptimized
                 className="h-full w-full object-cover"
               />
             </button>

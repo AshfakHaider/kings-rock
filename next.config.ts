@@ -1,8 +1,17 @@
 import type { NextConfig } from "next";
+import bundleAnalyzer from "@next/bundle-analyzer";
 
 const nextConfig: NextConfig = {
   typedRoutes: false,
   output: "standalone",
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**.supabase.co"
+      }
+    ]
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: "25mb"
@@ -10,4 +19,8 @@ const nextConfig: NextConfig = {
   }
 };
 
-export default nextConfig;
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true"
+});
+
+export default withBundleAnalyzer(nextConfig);

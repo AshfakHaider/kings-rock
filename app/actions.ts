@@ -44,6 +44,17 @@ function optionalNumber(formData: FormData, key: string) {
   return value ? Number(value) : null;
 }
 
+const STOCK_ACCOUNT_SELECT =
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at";
+const DAILY_TASK_SELECT = "id,title,description,task_date,created_by,created_at";
+const SOLD_ACCOUNT_SELECT =
+  "id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at";
+const GMAIL_SELECT = "id,email,recovery_info,status,used_for_stock_account_id,date_added,date_used,notes,created_at";
+const PROFILE_SELECT = "id,auth_user_id,name,phone,email,role,status,join_date,notes,created_at";
+const ADVANCE_SELECT = "id,employee_id,amount_given,date_given,purpose,payment_method,status,notes,created_by,created_at";
+const ADVANCE_TRANSACTION_SELECT = "id,advance_id,employee_id,type,amount,stock_account_id,transaction_date,notes,created_by,created_at";
+const EXPENSE_SELECT = "id,title,category,amount,expense_date,paid_by,notes,created_at";
+
 async function uploadStockImages(formData: FormData) {
   const files = getStockImageFiles(formData);
 
@@ -329,7 +340,7 @@ export async function deleteStockAccount(formData: FormData) {
   if (!hasSupabaseEnv()) return;
   const id = String(formData.get("id"));
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("stock_accounts").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("stock_accounts").select(STOCK_ACCOUNT_SELECT).eq("id", id).single();
   await supabase.from("stock_accounts").delete().eq("id", id);
   await logActivity("account_deleted", "stock_accounts", id, oldData, null);
   revalidatePath("/stock-accounts");
@@ -443,7 +454,7 @@ export async function deleteDailyTask(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("daily_tasks").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("daily_tasks").select(DAILY_TASK_SELECT).eq("id", id).single();
   const { error } = await supabase.from("daily_tasks").delete().eq("id", id);
 
   if (error) {
@@ -576,7 +587,7 @@ export async function saveSale(formData: FormData) {
   };
 
   const oldData = id
-    ? (await supabase.from("sold_accounts").select("*").eq("id", id).single()).data
+    ? (await supabase.from("sold_accounts").select(SOLD_ACCOUNT_SELECT).eq("id", id).single()).data
     : null;
   const result = id
     ? await supabase.from("sold_accounts").update(payload).eq("id", id).select().single()
@@ -626,7 +637,7 @@ export async function markSalePaid(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("sold_accounts").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("sold_accounts").select(SOLD_ACCOUNT_SELECT).eq("id", id).single();
   let result = await supabase
     .from("sold_accounts")
     .update({
@@ -672,7 +683,7 @@ export async function deleteSale(formData: FormData) {
   if (!hasSupabaseEnv()) return;
   const id = String(formData.get("id"));
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("sold_accounts").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("sold_accounts").select(SOLD_ACCOUNT_SELECT).eq("id", id).single();
   await supabase.from("sold_accounts").delete().eq("id", id);
   await logActivity("sale_deleted", "sold_accounts", id, oldData, null);
   revalidatePath("/sold-accounts");
@@ -748,7 +759,7 @@ export async function markGmailUsed(formData: FormData) {
   const supabase = await createClient();
   const { data: oldData } = await supabase
     .from("gmail_inventory")
-    .select("*")
+    .select(GMAIL_SELECT)
     .eq("id", id)
     .single();
 
@@ -866,7 +877,7 @@ export async function approveEmployee(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("profiles").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("profiles").select(PROFILE_SELECT).eq("id", id).single();
   const { data, error } = await supabase
     .from("profiles")
     .update({ status: "active" })
@@ -900,7 +911,7 @@ export async function deleteEmployee(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("profiles").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("profiles").select(PROFILE_SELECT).eq("id", id).single();
   const { error } = await supabase.from("profiles").delete().eq("id", id);
 
   if (error) {
@@ -968,8 +979,8 @@ export async function deleteAdvance(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("employee_advances").select("*").eq("id", id).maybeSingle();
-  const { data: oldTransactions } = await supabase.from("advance_transactions").select("*").eq("advance_id", id);
+  const { data: oldData } = await supabase.from("employee_advances").select(ADVANCE_SELECT).eq("id", id).maybeSingle();
+  const { data: oldTransactions } = await supabase.from("advance_transactions").select(ADVANCE_TRANSACTION_SELECT).eq("advance_id", id);
   const { error: transactionDeleteError } = await supabase.from("advance_transactions").delete().eq("advance_id", id);
 
   if (transactionDeleteError) {
@@ -1028,7 +1039,7 @@ export async function deleteAdvanceTransaction(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("advance_transactions").select("*").eq("id", id).maybeSingle();
+  const { data: oldData } = await supabase.from("advance_transactions").select(ADVANCE_TRANSACTION_SELECT).eq("id", id).maybeSingle();
   const { error } = await supabase.from("advance_transactions").delete().eq("id", id);
 
   if (error) {
@@ -1115,7 +1126,7 @@ export async function deleteExpense(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("expenses").select("*").eq("id", id).single();
+  const { data: oldData } = await supabase.from("expenses").select(EXPENSE_SELECT).eq("id", id).single();
   const { error } = await supabase.from("expenses").delete().eq("id", id);
 
   if (error) {

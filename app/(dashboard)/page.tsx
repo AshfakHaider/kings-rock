@@ -9,21 +9,12 @@ import {
   TrendingUp,
   Wallet
 } from "lucide-react";
-import { BarMetricChart } from "@/components/modules/charts";
+import { DeferredBarMetricChart } from "@/components/modules/lazy-charts";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatCard } from "@/components/modules/stat-card";
 import { Select } from "@/components/ui/select";
-import {
-  getCurrentProfile,
-  getDashboardSnapshot,
-  getExpenses,
-  getSoldAccounts,
-  getStockTotals,
-  getStockValueByGameSummary
-} from "@/lib/data";
-import { employeeProfitSeries, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
-import type { Expense, SoldAccount } from "@/lib/types";
+import { getDashboardSummary } from "@/lib/data";
 import { money } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -54,55 +45,6 @@ function safeMonth(value: string | undefined, fallback: number | "all") {
   return Number.isInteger(month) && month >= 1 && month <= 12 ? month : fallback;
 }
 
-function inSelectedPeriod(dateValue: string | null | undefined, year: number, month: number | "all") {
-  if (!dateValue) return false;
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return false;
-  if (date.getFullYear() !== year) return false;
-  return month === "all" || date.getMonth() + 1 === month;
-}
-
-function buildMonthlySeriesForYear(sales: SoldAccount[], year: number) {
-  return monthNames.map((month, index) => {
-    const monthSales = sales.filter((sale) => {
-      const cashDate = new Date(saleCashDate(sale));
-      return cashDate.getFullYear() === year && cashDate.getMonth() === index;
-    });
-
-    return {
-      month: month.slice(0, 3),
-      sales: monthSales.reduce((total, sale) => total + Number(sale.sold_amount), 0),
-      profit: monthSales.reduce((total, sale) => total + getProfit(sale), 0)
-    };
-  });
-}
-
-function dashboardSalesBySource(sales: SoldAccount[]) {
-  const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
-
-  for (const sale of sales) {
-    const source = sale.sold_source_website?.trim() || "Unknown";
-    const key = source.toLowerCase();
-    const item = buckets.get(key) ?? {
-      source,
-      soldCount: 0,
-      totalSales: 0,
-      profit: 0
-    };
-
-    item.soldCount += 1;
-    if (isPaidSale(sale)) {
-      item.totalSales += Number(sale.sold_amount);
-      if (sale.stock_account?.buying_price != null) {
-        item.profit += getProfit(sale);
-      }
-    }
-    buckets.set(key, item);
-  }
-
-  return Array.from(buckets.values()).sort((a, b) => b.soldCount - a.soldCount || b.totalSales - a.totalSales);
-}
-
 export default async function DashboardPage({
   searchParams
 }: {
@@ -112,57 +54,18 @@ export default async function DashboardPage({
   const now = new Date();
   const selectedYear = safeYear(params.year, now.getFullYear());
   const selectedMonth = safeMonth(params.month, now.getMonth() + 1);
-  const [snapshot, currentProfile] = await Promise.all([
-    getDashboardSnapshot(),
-    getCurrentProfile()
-  ]);
+  const snapshot = await getDashboardSummary({ year: selectedYear, month: selectedMonth });
   const canViewFinancials = snapshot.role !== "employee";
   const metrics = snapshot.metrics;
-  const employeeId = currentProfile.role === "employee" ? currentProfile.id : null;
-
-  const [
-    stockTotals,
-    currentStockValueByGame,
-    soldAccounts,
-    expenses
-  ] = await Promise.all([
-    getStockTotals({ excludeSold: true }),
-    getStockValueByGameSummary(),
-    getSoldAccounts(),
-    getExpenses()
-  ]);
-
-  const visibleSoldAccounts = employeeId
-    ? soldAccounts.filter((sale) => sale.employee_id === employeeId)
-    : soldAccounts;
-  const visibleExpenses = employeeId
-    ? expenses.filter((expense) => expense.paid_by === employeeId)
-    : expenses;
-  const filteredPaidSales = visibleSoldAccounts.filter(
-    (sale) => isPaidSale(sale) && inSelectedPeriod(saleCashDate(sale), selectedYear, selectedMonth)
-  );
-  const selectedYearPaidSales = visibleSoldAccounts.filter(
-    (sale) => isPaidSale(sale) && inSelectedPeriod(saleCashDate(sale), selectedYear, "all")
-  );
-  const filteredWaitingSales = visibleSoldAccounts.filter(
-    (sale) => !isPaidSale(sale) && inSelectedPeriod(sale.sold_date, selectedYear, selectedMonth)
-  );
-  const filteredExpenseAmount = visibleExpenses
-    .filter((expense: Expense) => inSelectedPeriod(expense.expense_date, selectedYear, selectedMonth))
-    .reduce((total, expense) => total + Number(expense.amount), 0);
-  const waitingPaymentSummary = {
-    count: filteredWaitingSales.length,
-    amount: filteredWaitingSales.reduce((total, sale) => total + Number(sale.sold_amount), 0)
-  };
-
-  const totalStockBuyingValue = stockTotals.buyingValue;
-  const totalStockSellingValue = stockTotals.sellingValue;
-  const filteredSalesAmount = filteredPaidSales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
-  const filteredBuyingCost = filteredPaidSales.reduce((total, sale) => total + Number(sale.stock_account?.buying_price ?? 0), 0);
-  const filteredGrossProfit = filteredSalesAmount - filteredBuyingCost;
-  const filteredWaitingAmount = waitingPaymentSummary.amount;
-  const selectedYearProfit = selectedYearPaidSales.reduce((total, sale) => total + getProfit(sale), 0);
-  const sourceRows = canViewFinancials ? dashboardSalesBySource(visibleSoldAccounts).slice(0, 5) : [];
+  const totalStockBuyingValue = metrics.totalStockBuyingValue;
+  const totalStockSellingValue = metrics.totalStockSellingValue;
+  const filteredSalesAmount = metrics.totalSalesAmount;
+  const filteredBuyingCost = metrics.totalBuyingCost;
+  const filteredGrossProfit = metrics.totalGrossProfit;
+  const filteredWaitingAmount = metrics.waitingPaymentAmount;
+  const filteredExpenseAmount = metrics.totalExpenses;
+  const selectedYearProfit = metrics.yearlyProfit;
+  const sourceRows = canViewFinancials ? snapshot.salesBySource : [];
   const yearOptions = Array.from(
     new Set([
       now.getFullYear(),
@@ -175,8 +78,9 @@ export default async function DashboardPage({
     .filter((year) => Number.isInteger(year) && year >= 2020 && year <= 2100)
     .sort((a, b) => b - a);
   const periodLabel = selectedMonth === "all" ? String(selectedYear) : `${monthNames[selectedMonth - 1]} ${selectedYear}`;
-  const yearMonthlySeries = buildMonthlySeriesForYear(selectedYearPaidSales, selectedYear);
-  const filteredEmployeeSeries = employeeProfitSeries(filteredPaidSales);
+  const yearMonthlySeries = snapshot.monthlySeries;
+  const filteredEmployeeSeries = snapshot.employeeProfitSeries;
+  const currentStockValueByGame = snapshot.stockValueByGame;
 
   return (
     <>
@@ -236,7 +140,7 @@ export default async function DashboardPage({
           icon={Banknote}
           tone="good"
         />
-        <StatCard title={`Paid sold accounts (${periodLabel})`} value={String(filteredPaidSales.length)} icon={ShoppingCart} />
+        <StatCard title={`Paid sold accounts (${periodLabel})`} value={String(metrics.totalSoldAccounts)} icon={ShoppingCart} />
         <StatCard
           title={`Received sales (${periodLabel})`}
           value={money(filteredSalesAmount, snapshot.currency)}
@@ -245,7 +149,7 @@ export default async function DashboardPage({
         />
         <StatCard
           title={`Waiting payments (${periodLabel})`}
-          value={String(waitingPaymentSummary.count)}
+          value={String(metrics.waitingPaymentCount)}
           icon={Clock3}
           tone="warn"
         />
@@ -308,7 +212,7 @@ export default async function DashboardPage({
           <div>
             <h2 className="text-lg font-semibold">Waiting For Payment</h2>
             <p className="text-sm text-muted-foreground">
-              {waitingPaymentSummary.count} accounts are waiting for platform payout in {periodLabel}.
+              {metrics.waitingPaymentCount} accounts are waiting for platform payout in {periodLabel}.
             </p>
           </div>
           <Button asChild variant="outline" className="w-full sm:w-auto">
@@ -318,7 +222,7 @@ export default async function DashboardPage({
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <BarMetricChart
+        <DeferredBarMetricChart
           title={canViewFinancials ? "Monthly sales and profit" : "Monthly sales"}
           data={yearMonthlySeries}
           xKey="month"
@@ -329,7 +233,7 @@ export default async function DashboardPage({
         />
         {canViewFinancials ? (
           <>
-            <BarMetricChart
+            <DeferredBarMetricChart
               title="Employee profit comparison"
               data={filteredEmployeeSeries}
               xKey="name"
@@ -338,7 +242,7 @@ export default async function DashboardPage({
                 { key: "sales", name: "Sales", color: "#38bdf8" }
               ]}
             />
-            <BarMetricChart
+            <DeferredBarMetricChart
               title="Stock value by game"
               data={currentStockValueByGame}
               xKey="game"

@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build && node scripts/prepare-standalone.cjs",
+    "analyze": "ANALYZE=true next build",
     "start": "next start",
     "start:render": "HOSTNAME=0.0.0.0 PORT=${PORT:-10000} node .next/standalone/server.js",
     "lint": "next lint",
@@ -15,9 +16,9 @@
     "live:create-admin": "node scripts/create-live-admin.cjs"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.1.1",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
-    "@radix-ui/react-slot": "^1.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -31,6 +32,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.9",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

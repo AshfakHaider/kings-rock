@@ -36,14 +36,29 @@ import type {
 } from "@/lib/types";
 import {
   employeeProfitSeries,
+  getProfit,
   getDashboardMetrics,
+  isPaidSale,
   monthlySeries,
+  saleCashDate,
   salesBySource,
   stockValueByGame
 } from "@/lib/metrics";
 import { normalizeCurrency } from "@/lib/utils";
 
-export const DEFAULT_PAGE_SIZE = 50;
+export const DEFAULT_PAGE_SIZE = 30;
+const PROFILE_SELECT = "id,auth_user_id,name,phone,email,role,status,join_date,notes,created_at";
+const SETTINGS_SELECT = "id,business_name,currency,game_categories,sale_source_websites,expense_categories,employee_permissions";
+const SOLD_ACCOUNT_SELECT =
+  "id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at,stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)";
+const ADVANCE_SELECT = "id,employee_id,amount_given,date_given,purpose,payment_method,status,notes,created_by,created_at,employee:profiles(id,name,email)";
+const ADVANCE_TRANSACTION_SELECT = "id,advance_id,employee_id,type,amount,stock_account_id,transaction_date,notes,created_by,created_at";
+const EXPENSE_SELECT = "id,title,category,amount,expense_date,paid_by,notes,created_at,payer:profiles!expenses_paid_by_fkey(id,name,email)";
+const STOCK_ACCOUNT_DETAIL_SELECT =
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
+const DAILY_TASK_SELECT = "id,title,description,task_date,created_by,created_at,creator:profiles!daily_tasks_created_by_fkey(id,name,email)";
+const DAILY_TASK_COMPLETION_SELECT = "id,task_id,employee_id,screenshot_url,screenshot_urls,completed_at,employee:profiles(id,name,email),task:daily_tasks(id,title,task_date)";
+const ACTIVITY_LOG_SELECT = "id,user_id,action,table_name,record_id,old_data,new_data,created_at,user:profiles(id,name,email)";
 const STOCK_ACCOUNT_LIST_SELECT =
   "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
 
@@ -248,7 +263,7 @@ export async function getCurrentProfile(): Promise<Profile> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(PROFILE_SELECT)
     .eq("auth_user_id", user.id)
     .single();
 
@@ -263,7 +278,7 @@ export async function getCurrentProfile(): Promise<Profile> {
 export async function getSettings(): Promise<Settings> {
   if (!hasSupabaseEnv()) return normalizeSettings(demoSettings);
   const supabase = await createClient();
-  const { data } = await supabase.from("settings").select("*").limit(1).single();
+  const { data } = await supabase.from("settings").select(SETTINGS_SELECT).limit(1).single();
   return normalizeSettings((data as Settings) ?? demoSettings);
 }
 
@@ -393,10 +408,140 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
   };
 }
 
+function dashboardSalesBySource(sales: SoldAccount[]) {
+  const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
+
+  for (const sale of sales) {
+    const source = sale.sold_source_website?.trim() || "Unknown";
+    const key = source.toLowerCase();
+    const item = buckets.get(key) ?? {
+      source,
+      soldCount: 0,
+      totalSales: 0,
+      profit: 0
+    };
+
+    item.soldCount += 1;
+    if (isPaidSale(sale)) {
+      item.totalSales += Number(sale.sold_amount);
+      if (sale.stock_account?.buying_price != null) {
+        item.profit += getProfit(sale);
+      }
+    }
+    buckets.set(key, item);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => b.soldCount - a.soldCount || b.totalSales - a.totalSales);
+}
+
+async function getDashboardSummaryFallback(options: DashboardPeriodOptions): Promise<DashboardSnapshot> {
+  const { year, month } = options;
+  const [settings, stockAccounts, soldAccounts, expenses, advanceTransactions, currentProfile] =
+    await Promise.all([
+      getSettings(),
+      getStockAccounts(),
+      getSoldAccounts(),
+      getExpenses(),
+      getAdvanceTransactions(),
+      getCurrentProfile()
+    ]);
+  const visibleSoldAccounts =
+    currentProfile.role === "employee"
+      ? soldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
+      : soldAccounts;
+  const visibleExpenses =
+    currentProfile.role === "employee"
+      ? expenses.filter((expense) => expense.paid_by === currentProfile.id)
+      : expenses;
+  const visibleAdvanceTransactions =
+    currentProfile.role === "employee"
+      ? advanceTransactions.filter((transaction) => transaction.employee_id === currentProfile.id)
+      : advanceTransactions;
+  const visibleStockAccounts =
+    currentProfile.role === "employee"
+      ? stockAccounts.filter((account) => account.assigned_employee_id === currentProfile.id)
+      : stockAccounts;
+  const activeStockAccounts = visibleStockAccounts.filter((account) => account.status !== "sold");
+  const periodPaidSales = visibleSoldAccounts.filter(
+    (sale) => isPaidSale(sale) && inDashboardPeriod(saleCashDate(sale), year, month)
+  );
+  const yearPaidSales = visibleSoldAccounts.filter(
+    (sale) => isPaidSale(sale) && inDashboardPeriod(saleCashDate(sale), year, "all")
+  );
+  const periodWaitingSales = visibleSoldAccounts.filter(
+    (sale) => !isPaidSale(sale) && inDashboardPeriod(sale.sold_date, year, month)
+  );
+  const periodExpenses = visibleExpenses.filter((expense) =>
+    inDashboardPeriod(expense.expense_date, year, month)
+  );
+  const totalSalesAmount = periodPaidSales.reduce((total, sale) => total + Number(sale.sold_amount), 0);
+  const totalBuyingCost = periodPaidSales.reduce(
+    (total, sale) => total + Number(sale.stock_account?.buying_price ?? 0),
+    0
+  );
+  const totalGrossProfit = totalSalesAmount - totalBuyingCost;
+  const totalExpenses = periodExpenses.reduce((total, expense) => total + Number(expense.amount), 0);
+
+  return normalizeDashboardSnapshot({
+    currency: normalizeCurrency(settings.currency),
+    role: currentProfile.role,
+    metrics: {
+      totalStockAccounts: activeStockAccounts.length,
+      totalStockBuyingValue: activeStockAccounts.reduce((total, account) => total + Number(account.buying_price), 0),
+      totalStockSellingValue: activeStockAccounts.reduce((total, account) => total + Number(account.selling_price ?? 0), 0),
+      totalSoldAccounts: periodPaidSales.length,
+      totalSalesAmount,
+      waitingPaymentCount: periodWaitingSales.length,
+      waitingPaymentAmount: periodWaitingSales.reduce((total, sale) => total + Number(sale.sold_amount), 0),
+      totalBuyingCost,
+      totalGrossProfit,
+      totalExpenses,
+      netProfit: totalGrossProfit - totalExpenses,
+      monthlyProfit: totalGrossProfit,
+      yearlyProfit: yearPaidSales.reduce((total, sale) => total + getProfit(sale), 0),
+      availableGmailCount: 0,
+      usedGmailCount: 0,
+      employeeAdvanceBalance: visibleAdvanceTransactions.reduce((total, transaction) => {
+        if (transaction.type === "money_given") return total + Number(transaction.amount);
+        if (transaction.type === "account_purchase" || transaction.type === "money_returned") return total - Number(transaction.amount);
+        return total + Number(transaction.amount);
+      }, 0)
+    },
+    monthlySeries: Array.from({ length: 12 }, (_, index) => {
+      const monthSales = yearPaidSales.filter((sale) => new Date(saleCashDate(sale)).getMonth() === index);
+      return {
+        month: new Date(Date.UTC(year, index, 1)).toLocaleString("en", { month: "short" }),
+        sales: monthSales.reduce((total, sale) => total + Number(sale.sold_amount), 0),
+        profit: monthSales.reduce((total, sale) => total + getProfit(sale), 0)
+      };
+    }),
+    employeeProfitSeries: employeeProfitSeries(periodPaidSales),
+    salesBySource: dashboardSalesBySource(visibleSoldAccounts).slice(0, 5),
+    stockValueByGame: stockValueByGame(activeStockAccounts).sort((a, b) => b.value - a.value).slice(0, 12)
+  });
+}
+
+export async function getDashboardSummary(options: DashboardPeriodOptions): Promise<DashboardSnapshot> {
+  if (!hasSupabaseEnv()) return getDashboardSummaryFallback(options);
+
+  const supabase = await createClient();
+  const month = options.month === "all" ? null : options.month;
+  const { data, error } = await supabase.rpc("dashboard_summary", {
+    p_year: options.year,
+    p_month: month
+  });
+
+  if (!error && data) {
+    return normalizeDashboardSnapshot(data as DashboardSnapshot);
+  }
+
+  return getDashboardSummaryFallback(options);
+}
+
 export async function getProfiles(): Promise<Profile[]> {
   if (!hasSupabaseEnv()) return getDemoProfiles();
   const supabase = await createClient();
-  const { data } = await supabase.from("profiles").select("*").order("created_at");
+  const { data } = await supabase.from("profiles").select(PROFILE_SELECT).order("created_at");
   return (data as Profile[]) ?? [];
 }
 
@@ -515,7 +660,7 @@ export async function getStockAccount(id: string): Promise<StockAccount | null> 
   const supabase = await createClient();
   const { data } = await supabase
     .from("stock_accounts")
-    .select("*, assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)")
+    .select(STOCK_ACCOUNT_DETAIL_SELECT)
     .eq("id", id)
     .maybeSingle();
 
@@ -564,9 +709,9 @@ export async function getSoldAccounts(): Promise<SoldAccount[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("sold_accounts")
-    .select("*, stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
+    .select(SOLD_ACCOUNT_SELECT)
     .order("sold_date", { ascending: false });
-  return (data as SoldAccount[]) ?? [];
+  return (data as unknown as SoldAccount[]) ?? [];
 }
 
 export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promise<PagedResult<SoldAccount>> {
@@ -589,7 +734,7 @@ export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promis
   const { from, to } = pageRange(page, pageSize);
   let query = supabase
     .from("sold_accounts")
-    .select("*, stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)", { count: "exact" });
+    .select(SOLD_ACCOUNT_SELECT, { count: "exact" });
 
   if (employeeId) query = query.eq("employee_id", employeeId);
   if (paymentStatus === "not_paid") query = query.neq("payment_status", "paid");
@@ -613,7 +758,7 @@ export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promis
 
   const { data, count } = await query.order("sold_date", { ascending: false }).range(from, to);
   return {
-    rows: (data as SoldAccount[]) ?? [],
+    rows: (data as unknown as SoldAccount[]) ?? [],
     total: count ?? 0
   };
 }
@@ -655,7 +800,7 @@ export async function getDashboardSourceSales(options: { employeeId?: string | n
   const supabase = await createClient();
   let query = supabase
     .from("sold_accounts")
-    .select("*, stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)")
+    .select(SOLD_ACCOUNT_SELECT)
     .order("sold_date", { ascending: false })
     .limit(5000);
 
@@ -864,9 +1009,9 @@ export async function getDailyTasks(): Promise<DailyTask[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("daily_tasks")
-    .select("*, creator:profiles!daily_tasks_created_by_fkey(id,name,email)")
+    .select(DAILY_TASK_SELECT)
     .order("task_date", { ascending: false });
-  return (data as DailyTask[]) ?? [];
+  return (data as unknown as DailyTask[]) ?? [];
 }
 
 export async function getDailyTaskCompletions(): Promise<DailyTaskCompletion[]> {
@@ -874,9 +1019,9 @@ export async function getDailyTaskCompletions(): Promise<DailyTaskCompletion[]> 
   const supabase = await createClient();
   const { data } = await supabase
     .from("daily_task_completions")
-    .select("*, employee:profiles(id,name,email), task:daily_tasks(id,title,task_date)")
+    .select(DAILY_TASK_COMPLETION_SELECT)
     .order("completed_at", { ascending: false });
-  return (data as DailyTaskCompletion[]) ?? [];
+  return (data as unknown as DailyTaskCompletion[]) ?? [];
 }
 
 export async function getGmailAccounts(): Promise<GmailAccount[]> {
@@ -894,9 +1039,9 @@ export async function getAdvances(): Promise<EmployeeAdvance[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("employee_advances")
-    .select("*, employee:profiles(id,name,email)")
+    .select(ADVANCE_SELECT)
     .order("created_at", { ascending: false });
-  return (data as EmployeeAdvance[]) ?? [];
+  return (data as unknown as EmployeeAdvance[]) ?? [];
 }
 
 export async function getAdvanceTransactions(): Promise<AdvanceTransaction[]> {
@@ -904,7 +1049,7 @@ export async function getAdvanceTransactions(): Promise<AdvanceTransaction[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("advance_transactions")
-    .select("*")
+    .select(ADVANCE_TRANSACTION_SELECT)
     .order("transaction_date", { ascending: false });
   return (data as AdvanceTransaction[]) ?? [];
 }
@@ -914,9 +1059,9 @@ export async function getExpenses(): Promise<Expense[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("expenses")
-    .select("*, payer:profiles!expenses_paid_by_fkey(id,name,email)")
+    .select(EXPENSE_SELECT)
     .order("expense_date", { ascending: false });
-  return (data as Expense[]) ?? [];
+  return (data as unknown as Expense[]) ?? [];
 }
 
 export async function getExpensesPage(options: ExpensePageOptions = {}): Promise<PagedResult<Expense>> {
@@ -939,7 +1084,7 @@ export async function getExpensesPage(options: ExpensePageOptions = {}): Promise
   const { from, to } = pageRange(page, pageSize);
   let query = supabase
     .from("expenses")
-    .select("*, payer:profiles!expenses_paid_by_fkey(id,name,email)", { count: "exact" });
+    .select(EXPENSE_SELECT, { count: "exact" });
 
   if (paidBy) query = query.eq("paid_by", paidBy);
   if (categories?.length) query = query.in("category", categories);
@@ -958,7 +1103,7 @@ export async function getExpensesPage(options: ExpensePageOptions = {}): Promise
 
   const { data, count } = await query.order("expense_date", { ascending: false }).range(from, to);
   return {
-    rows: (data as Expense[]) ?? [],
+    rows: (data as unknown as Expense[]) ?? [],
     total: count ?? 0
   };
 }
@@ -1008,8 +1153,8 @@ export async function getActivityLogs(): Promise<ActivityLog[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("activity_logs")
-    .select("*, user:profiles(id,name,email)")
+    .select(ACTIVITY_LOG_SELECT)
     .order("created_at", { ascending: false })
     .limit(100);
-  return (data as ActivityLog[]) ?? [];
+  return (data as unknown as ActivityLog[]) ?? [];
 }
