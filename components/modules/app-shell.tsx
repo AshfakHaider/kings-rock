@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createClient, hasSupabaseEnv, REMEMBER_SESSION_COOKIE } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,14 +9,14 @@ import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 async function signOut() {
   "use server";
+  const cookieStore = await cookies();
   if (hasSupabaseEnv()) {
     const supabase = await createClient();
     await supabase.auth.signOut();
-  } else {
-    const cookieStore = await cookies();
-    cookieStore.delete("demo_role");
-    cookieStore.delete("demo_profile_id");
   }
+  cookieStore.delete(REMEMBER_SESSION_COOKIE);
+  cookieStore.delete("demo_role");
+  cookieStore.delete("demo_profile_id");
   redirect("/login");
 }
 

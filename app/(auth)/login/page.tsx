@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { Gamepad2 } from "lucide-react";
 import Link from "next/link";
-import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv, REMEMBER_SESSION_COOKIE } from "@/lib/supabase/server";
 import { getDemoProfiles } from "@/lib/demo-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,19 @@ async function login(formData: FormData) {
   "use server";
   const identifier = String(formData.get("identifier") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const remember = formData.get("remember") === "on";
+  const cookieStore = await cookies();
+  const baseCookieOptions = { path: "/", sameSite: "lax" as const };
+  const persistentCookieOptions = {
+    ...baseCookieOptions,
+    maxAge: 60 * 60 * 24 * 30
+  };
+
+  cookieStore.set(
+    REMEMBER_SESSION_COOKIE,
+    remember ? "persistent" : "session",
+    remember ? persistentCookieOptions : baseCookieOptions
+  );
 
   if (!hasSupabaseEnv()) {
     const profile = (await getDemoProfiles()).find(
@@ -26,9 +39,9 @@ async function login(formData: FormData) {
       redirect("/login?error=Employee%20not%20found%20or%20inactive");
     }
 
-    const cookieStore = await cookies();
-    cookieStore.set("demo_role", profile.role, { path: "/", sameSite: "lax" });
-    cookieStore.set("demo_profile_id", profile.id, { path: "/", sameSite: "lax" });
+    const authCookieOptions = remember ? persistentCookieOptions : baseCookieOptions;
+    cookieStore.set("demo_role", profile.role, authCookieOptions);
+    cookieStore.set("demo_profile_id", profile.id, authCookieOptions);
     redirect("/");
   }
 
@@ -99,12 +112,32 @@ export default async function LoginPage({
           <form action={login} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="identifier">Email or phone</Label>
-              <Input id="identifier" name="identifier" type="text" placeholder="admin@example.com or +88017..." required />
+              <Input
+                id="identifier"
+                name="identifier"
+                type="text"
+                autoComplete="username"
+                placeholder="admin@example.com or +88017..."
+                required
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <PasswordInput id="password" name="password" required />
+              <PasswordInput id="password" name="password" autoComplete="current-password" required />
             </div>
+            <label
+              htmlFor="remember"
+              className="flex cursor-pointer items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
+            >
+              <input
+                id="remember"
+                name="remember"
+                type="checkbox"
+                defaultChecked
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <span>Remember me on this device</span>
+            </label>
             {params.error ? (
               <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {params.error}

@@ -8,8 +8,20 @@ type CookieToSet = {
   options: CookieOptions;
 };
 
+const REMEMBER_SESSION_COOKIE = "kr_remember_session";
+
+function applyRememberPreference(options: CookieOptions, rememberPreference?: string) {
+  if (rememberPreference !== "session") return options;
+
+  const sessionOptions = { ...options };
+  delete sessionOptions.expires;
+  delete sessionOptions.maxAge;
+  return sessionOptions;
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const rememberPreference = request.cookies.get(REMEMBER_SESSION_COOKIE)?.value;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,7 +37,7 @@ export async function updateSession(request: NextRequest) {
           );
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
+            response.cookies.set(name, value, applyRememberPreference(options, rememberPreference))
           );
         }
       }

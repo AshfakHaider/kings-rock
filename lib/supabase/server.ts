@@ -9,6 +9,17 @@ type CookieToSet = {
   options: CookieOptions;
 };
 
+export const REMEMBER_SESSION_COOKIE = "kr_remember_session";
+
+function applyRememberPreference(options: CookieOptions, rememberPreference?: string) {
+  if (rememberPreference !== "session") return options;
+
+  const sessionOptions = { ...options };
+  delete sessionOptions.expires;
+  delete sessionOptions.maxAge;
+  return sessionOptions;
+}
+
 export async function createClient() {
   const cookieStore = await cookies();
 
@@ -22,8 +33,9 @@ export async function createClient() {
         },
         setAll(cookiesToSet: CookieToSet[]) {
           try {
+            const rememberPreference = cookieStore.get(REMEMBER_SESSION_COOKIE)?.value;
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              cookieStore.set(name, value, applyRememberPreference(options, rememberPreference))
             );
           } catch {
             // Server components cannot always set cookies. Middleware refreshes sessions.
