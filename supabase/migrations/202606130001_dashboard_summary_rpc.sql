@@ -1,3 +1,6 @@
+alter table public.sold_accounts
+  add column if not exists payment_received_date date;
+
 create or replace function public.dashboard_summary(
   p_year int,
   p_month int default null
