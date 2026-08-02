@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Eye, Pencil, Plus, Trash2, X } from "lucide-react";
-import { saveStockAccount } from "@/app/actions";
+import { addGameCategory, saveStockAccount } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +20,27 @@ type SelectedImage = {
   file: File;
   url: string;
 };
+
+const DEFAULT_GAME_CATEGORIES = ["Mobile Legends", "Clash of Clans"];
+
+function normalizeGameName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function mergeGameCategories(...groups: Array<Array<string | null | undefined>>) {
+  const categories: string[] = [];
+  const seen = new Set<string>();
+
+  groups.flat().forEach((game) => {
+    const normalized = normalizeGameName(String(game ?? ""));
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) return;
+    seen.add(key);
+    categories.push(normalized);
+  });
+
+  return categories;
+}
 
 function formatDateValue(date: Date) {
   const year = date.getFullYear();
@@ -67,12 +88,30 @@ export function StockAccountModal({
   const [notice, setNotice] = useState<string | null>(null);
   const [assignedEmployeeId, setAssignedEmployeeId] = useState(stock?.assigned_employee_id ?? "");
   const [imageDownloadPending, setImageDownloadPending] = useState(false);
+  const [savedGameCategories, setSavedGameCategories] = useState(() =>
+    mergeGameCategories(DEFAULT_GAME_CATEGORIES, gameCategories, [stock?.game_name])
+  );
+  const [selectedGameName, setSelectedGameName] = useState(
+    normalizeGameName(stock?.game_name ?? gameCategories[0] ?? DEFAULT_GAME_CATEGORIES[0])
+  );
+  const [showAddGame, setShowAddGame] = useState(false);
+  const [newGameName, setNewGameName] = useState("");
+  const [addGamePending, startAddGameTransition] = useTransition();
   const [pending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
   const isEdit = variant === "edit";
+  const availableGameCategories = mergeGameCategories(
+    DEFAULT_GAME_CATEGORIES,
+    savedGameCategories,
+    [stock?.game_name, selectedGameName]
+  );
   const canUsePrivateNotes =
     isAdmin || assignedEmployeeId === currentProfileId || (isEdit && stock?.assigned_employee_id === currentProfileId);
+
+  useEffect(() => {
+    setSavedGameCategories(mergeGameCategories(DEFAULT_GAME_CATEGORIES, gameCategories, [stock?.game_name]));
+  }, [gameCategories, stock?.game_name]);
 
   function syncFileInput(images: SelectedImage[]) {
     if (!fileInputRef.current) return;
@@ -151,6 +190,30 @@ export function StockAccountModal({
     }
   }
 
+  function addPersistentGameCategory() {
+    const normalized = normalizeGameName(newGameName);
+    if (!normalized) {
+      setNotice("Please enter a game name first.");
+      return;
+    }
+
+    startAddGameTransition(async () => {
+      try {
+        const formData = new FormData();
+        formData.set("game_name", normalized);
+        const updatedCategories = await addGameCategory(formData);
+        setSavedGameCategories(mergeGameCategories(DEFAULT_GAME_CATEGORIES, updatedCategories, [normalized]));
+        setSelectedGameName(normalized);
+        setNewGameName("");
+        setShowAddGame(false);
+        setNotice(`${normalized} added for everyone.`);
+        router.refresh();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Game could not be added.");
+      }
+    });
+  }
+
   function submit(formData: FormData) {
     startTransition(async () => {
       try {
@@ -204,26 +267,58 @@ export function StockAccountModal({
               <input type="hidden" name="id" value={stock?.id ?? ""} />
               <div className="space-y-2">
                 <Label htmlFor="game_name">Game name</Label>
-                <Input
+                <Select
                   id="game_name"
                   name="game_name"
-                  list="game_name_suggestions"
                   required
-                  placeholder="Mobile Legends"
-                  defaultValue={stock?.game_name ?? gameCategories[0] ?? "Mobile Legends"}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="words"
-                  spellCheck={false}
-                />
-                <datalist id="game_name_suggestions">
-                  {gameCategories.map((game) => (
-                    <option key={game} value={game} />
+                  value={selectedGameName}
+                  onChange={(event) => setSelectedGameName(event.currentTarget.value)}
+                >
+                  {availableGameCategories.map((game) => (
+                    <option key={game} value={game}>
+                      {game}
+                    </option>
                   ))}
-                </datalist>
-                <p className="text-xs text-muted-foreground">
-                  Type any game name, or choose a saved suggestion.
-                </p>
+                </Select>
+                {isAdmin && showAddGame ? (
+                  <div className="rounded-md border bg-muted/30 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        value={newGameName}
+                        onChange={(event) => setNewGameName(event.currentTarget.value)}
+                        placeholder="Enter new game name"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="words"
+                        spellCheck={false}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            addPersistentGameCategory();
+                          }
+                        }}
+                      />
+                      <Button type="button" variant="secondary" onClick={addPersistentGameCategory} disabled={addGamePending}>
+                        {addGamePending ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Admin only. This adds the game to settings so everyone can choose it.
+                    </p>
+                  </div>
+                ) : isAdmin ? (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <button
+                      type="button"
+                      className="text-left text-xs font-medium text-primary hover:underline"
+                      onClick={() => setShowAddGame(true)}
+                    >
+                      Add new game
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Only admins can add new game names.</p>
+                )}
               </div>
 
               <div className="space-y-2">
