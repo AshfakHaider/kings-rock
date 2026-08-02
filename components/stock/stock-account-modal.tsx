@@ -201,12 +201,18 @@ export function StockAccountModal({
       try {
         const formData = new FormData();
         formData.set("game_name", normalized);
-        const updatedCategories = await addGameCategory(formData);
-        setSavedGameCategories(mergeGameCategories(DEFAULT_GAME_CATEGORIES, updatedCategories, [normalized]));
+        const result = await addGameCategory(formData);
+
+        if (!result.ok) {
+          setNotice(result.message);
+          return;
+        }
+
+        setSavedGameCategories(mergeGameCategories(DEFAULT_GAME_CATEGORIES, result.gameCategories, [normalized]));
         setSelectedGameName(normalized);
         setNewGameName("");
         setShowAddGame(false);
-        setNotice(`${normalized} added for everyone.`);
+        setNotice(result.message);
         router.refresh();
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "Game could not be added.");

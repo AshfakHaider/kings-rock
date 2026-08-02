@@ -1167,54 +1167,81 @@ export async function saveSettings(formData: FormData) {
 }
 
 export async function addGameCategory(formData: FormData) {
-  const profile = await getCurrentProfile();
-  if (profile.role !== "admin") {
-    throw new Error("Only admins can add new games.");
+  try {
+    const profile = await getCurrentProfile();
+    if (profile.role !== "admin") {
+      return { ok: false, message: "Only admins can add new games.", gameCategories: [] };
+    }
+
+    const gameName = cleanStockText(text(formData, "game_name"));
+    if (!gameName) {
+      return { ok: false, message: "Game name is required.", gameCategories: [] };
+    }
+
+    if (!hasSupabaseEnv()) {
+      return { ok: true, message: `${gameName} added.`, gameCategories: [gameName] };
+    }
+
+    const supabase = hasSupabaseAdminEnv() ? createAdminClient() : await createClient();
+    const { data: settings, error: fetchError } = await supabase
+      .from("settings")
+      .select("id,game_categories")
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchError) {
+      return { ok: false, message: fetchError.message, gameCategories: [] };
+    }
+
+    if (!settings) {
+      return { ok: false, message: "Settings row not found. Please add settings first.", gameCategories: [] };
+    }
+
+    const existingCategories = Array.isArray(settings.game_categories)
+      ? (settings.game_categories as string[])
+      : [];
+    const normalizedGame = gameName.toLowerCase();
+
+    if (existingCategories.some((category) => category.trim().toLowerCase() === normalizedGame)) {
+      return {
+        ok: true,
+        message: `${gameName} already exists.`,
+        gameCategories: existingCategories
+      };
+    }
+
+    const nextCategories = [...existingCategories, gameName];
+
+    const { data, error } = await supabase
+      .from("settings")
+      .update({ game_categories: nextCategories })
+      .eq("id", settings.id)
+      .select("game_categories")
+      .single();
+
+    if (error) {
+      return { ok: false, message: error.message, gameCategories: existingCategories };
+    }
+
+    try {
+      await logActivity("game_category_added", "settings", settings.id, settings, data);
+    } catch {
+      // Adding a game should not fail just because activity logging is unavailable.
+    }
+
+    revalidatePath("/stock-accounts");
+    revalidatePath("/settings");
+
+    return {
+      ok: true,
+      message: `${gameName} added for everyone.`,
+      gameCategories: (data.game_categories as string[]) ?? nextCategories
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Game could not be added.",
+      gameCategories: []
+    };
   }
-
-  const gameName = cleanStockText(text(formData, "game_name"));
-  if (!gameName) {
-    throw new Error("Game name is required.");
-  }
-
-  if (!hasSupabaseEnv()) {
-    return [gameName];
-  }
-
-  const supabase = await createClient();
-  const { data: settings, error: fetchError } = await supabase
-    .from("settings")
-    .select("id,game_categories")
-    .limit(1)
-    .single();
-
-  if (fetchError) {
-    throw new Error(fetchError.message);
-  }
-
-  const existingCategories = Array.isArray(settings.game_categories)
-    ? (settings.game_categories as string[])
-    : [];
-  const normalizedGame = gameName.toLowerCase();
-  if (existingCategories.some((category) => category.trim().toLowerCase() === normalizedGame)) {
-    return existingCategories;
-  }
-
-  const nextCategories = [...existingCategories, gameName];
-
-  const { data, error } = await supabase
-    .from("settings")
-    .update({ game_categories: nextCategories })
-    .eq("id", settings.id)
-    .select("game_categories")
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await logActivity("game_category_added", "settings", settings.id, settings, data);
-  revalidatePath("/stock-accounts");
-  revalidatePath("/settings");
-  return (data.game_categories as string[]) ?? nextCategories;
 }
