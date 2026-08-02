@@ -54,6 +54,17 @@ const PROFILE_SELECT = "id,auth_user_id,name,phone,email,role,status,join_date,n
 const ADVANCE_SELECT = "id,employee_id,amount_given,date_given,purpose,payment_method,status,notes,created_by,created_at";
 const ADVANCE_TRANSACTION_SELECT = "id,advance_id,employee_id,type,amount,stock_account_id,transaction_date,notes,created_by,created_at";
 const EXPENSE_SELECT = "id,title,category,amount,expense_date,paid_by,notes,created_at";
+const DEFAULT_SETTINGS_PAYLOAD = {
+  business_name: "Kings Rock",
+  currency: "USD",
+  game_categories: ["Mobile Legends", "Clash of Clans"],
+  sale_source_websites: ["Facebook", "PlayerAuctions", "G2G", "Discord"],
+  expense_categories: ["gmail_purchase", "ads", "website_fee", "employee_payment", "scam_account", "refund_account", "other"],
+  employee_permissions: {
+    can_view_profit: false,
+    can_view_buying_price: false
+  }
+};
 
 async function uploadStockImages(formData: FormData) {
   const files = getStockImageFiles(formData);
@@ -1194,7 +1205,40 @@ export async function addGameCategory(formData: FormData) {
     }
 
     if (!settings) {
-      return { ok: false, message: "Settings row not found. Please add settings first.", gameCategories: [] };
+      const seededCategories = [
+        ...DEFAULT_SETTINGS_PAYLOAD.game_categories,
+        gameName
+      ].filter(
+        (category, index, categories) =>
+          categories.findIndex((item) => item.trim().toLowerCase() === category.trim().toLowerCase()) === index
+      );
+      const { data: createdSettings, error: createError } = await supabase
+        .from("settings")
+        .insert({
+          ...DEFAULT_SETTINGS_PAYLOAD,
+          game_categories: seededCategories
+        })
+        .select("id,game_categories")
+        .single();
+
+      if (createError) {
+        return { ok: false, message: createError.message, gameCategories: [] };
+      }
+
+      try {
+        await logActivity("settings_created", "settings", createdSettings.id, null, createdSettings);
+      } catch {
+        // Settings creation should not fail just because activity logging is unavailable.
+      }
+
+      revalidatePath("/stock-accounts");
+      revalidatePath("/settings");
+
+      return {
+        ok: true,
+        message: `${gameName} added for everyone.`,
+        gameCategories: (createdSettings.game_categories as string[]) ?? seededCategories
+      };
     }
 
     const existingCategories = Array.isArray(settings.game_categories)
