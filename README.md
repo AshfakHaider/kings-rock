@@ -148,6 +148,87 @@ For the cheapest image usage, the app compresses stock images and task screensho
 
 If image storage grows beyond the free Supabase Storage limit, move image storage to Cloudflare R2 while keeping Supabase for Auth, Postgres, and RLS.
 
+## Telegram Game Bot
+
+The app includes a server-side Telegram webhook for adding stock game categories without changing the database schema.
+
+Supported commands:
+
+```text
+/addgame RSL
+/games
+/help
+/draft
+/cancelstock
+```
+
+Only allowed Telegram user IDs can add games. The command updates `settings.game_categories`, so new games appear in the Stock Account game dropdown for everyone.
+
+The bot can also create stock accounts from Telegram messages:
+
+1. Send the account screenshot/photo with the account title as the caption:
+
+```text
+ML# 1632 collector Natalia EPIC change Lancelot Valir moskov Kagura Gatokacka emblem Max
+```
+
+2. Send the Gmail/password text. This is saved into the stock account private note.
+
+```text
+example@gmail.com
+password123
+```
+
+3. Send the selling price:
+
+```text
+15$
+```
+
+4. The bot asks for buying price. Reply with only the buying price:
+
+```text
+10.82
+```
+
+After the buying price is received, the bot optimizes Telegram images to JPEG with a maximum 1600px side, uploads them to the existing `stock-images` bucket, and creates the stock account as `available`. It uses the title prefix as the secret code, such as `ML# 1632`, and prevents duplicate stock by secret code or title.
+
+1. Create a bot with Telegram `@BotFather` and copy the bot token.
+2. Find your numeric Telegram user ID using `@userinfobot`, or send a message to your bot and inspect Telegram `getUpdates`.
+3. Add these environment variables on Vercel/Render and locally:
+
+```bash
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_ALLOWED_USER_IDS=123456789
+```
+
+For multiple admins, use commas:
+
+```bash
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+```
+
+Use a long random value for `TELEGRAM_WEBHOOK_SECRET`.
+
+4. Deploy the app, then register the webhook:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=https://kings-rock.vercel.app/api/telegram/webhook" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+If you use Render instead, replace the URL with your Render domain.
+
+5. Open Telegram and send:
+
+```text
+/addgame RSL
+```
+
+The bot will reply when the game has been added or already exists.
+
 ## Security Notes
 
 - Supabase RLS is enabled for every business table.
