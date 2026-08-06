@@ -59,6 +59,7 @@ type TelegramStockDraft = {
   accountTitle?: string;
   chatId: string;
   createdAt: string;
+  editingField?: "title" | "private_note" | "selling_price" | "buying_price" | null;
   gameName?: string;
   imageFileIds: string[];
   buyingPrice?: number;
@@ -567,6 +568,18 @@ function missingApprovalFields(draft: TelegramStockDraft) {
   return missing;
 }
 
+function nextDraftInstruction(draft: TelegramStockDraft) {
+  const missing = missingApprovalFields(draft);
+  const nextMissing = missing[0];
+
+  if (!nextMissing) return "Ready. Tap Approve to add this account to stock.";
+  if (nextMissing === "title") return "Next: forward or send the account title with code, like ML# 1632 ...";
+  if (nextMissing === "image") return "Next: forward or upload at least one account image.";
+  if (nextMissing === "private note") return "Next: send Gmail/password private note.";
+  if (nextMissing === "selling price") return "Next: send selling price, like 15$ or Price: 15$.";
+  return "Next: send buying price, like 10 or $10.";
+}
+
 function draftPreviewText(draft: TelegramStockDraft) {
   const missing = missingApprovalFields(draft);
   return [
@@ -580,9 +593,8 @@ function draftPreviewText(draft: TelegramStockDraft) {
     typeof draft.sellingPrice === "number" ? `Selling price: $${draft.sellingPrice}` : "Selling price: missing",
     typeof draft.buyingPrice === "number" ? `Buying price: $${draft.buyingPrice}` : "Buying price: missing",
     "",
-    missing.length
-      ? `Send missing: ${missing.join(", ")}. Then tap Approve.`
-      : "Ready. Tap Approve to add this account to stock."
+    missing.length ? `Missing: ${missing.join(", ")}` : null,
+    nextDraftInstruction(draft)
   ].join("\n");
 }
 
@@ -598,9 +610,28 @@ function draftPreviewMarkup() {
   };
 }
 
+function draftEditMarkup() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Title", callback_data: "stock:edit:title" },
+        { text: "Selling price", callback_data: "stock:edit:selling_price" }
+      ],
+      [
+        { text: "Buying price", callback_data: "stock:edit:buying_price" },
+        { text: "Private note", callback_data: "stock:edit:private_note" }
+      ],
+      [
+        { text: "Back", callback_data: "stock:edit:back" },
+        { text: "Delete", callback_data: "stock:delete" }
+      ]
+    ]
+  };
+}
+
 async function sendOrUpdateDraftPreview(chatId: number | string, draft: TelegramStockDraft) {
   const text = draftPreviewText(draft);
-  const extra = { reply_markup: draftPreviewMarkup() };
+  const extra = missingApprovalFields(draft).length ? {} : { reply_markup: draftPreviewMarkup() };
 
   if (draft.previewMessageId) {
     const edited = await editTelegramMessageText(chatId, draft.previewMessageId, text, extra);
@@ -629,7 +660,7 @@ async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPric
       game_name: gameName,
       image_url: imageUrls[0] ?? null,
       image_urls: imageUrls,
-      notes: draft.note ? `Telegram private note:\n${draft.note}` : null,
+      notes: draft.note ?? null,
       purchase_date: dhakaToday(),
       purchase_source: "Telegram",
       secret_code: draft.secretCode,
@@ -648,12 +679,88 @@ async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPric
   return data;
 }
 
+async function applyDraftEdit(chatId: number | string, key: string, draft: TelegramStockDraft, text: string, settingsCategories: string[]) {
+  const now = new Date().toISOString();
+  let nextDraft: TelegramStockDraft | null = null;
+
+  if (draft.editingField === "title") {
+    const parsed = parseAccountText(text, settingsCategories);
+    nextDraft = {
+      ...draft,
+      accountTitle: parsed.accountTitle,
+      editingField: null,
+      gameName: parsed.gameName,
+      secretCode: parsed.secretCode,
+      updatedAt: now
+    };
+  }
+
+  if (draft.editingField === "private_note") {
+    const note = text.trim();
+    if (!note) {
+      await sendTelegramMessage(chatId, "Please send the Gmail/password private note.");
+      return true;
+    }
+
+    nextDraft = {
+      ...draft,
+      editingField: null,
+      note,
+      updatedAt: now
+    };
+  }
+
+  if (draft.editingField === "selling_price") {
+    const sellingPrice = parseMoney(text);
+    if (sellingPrice === null) {
+      await sendTelegramMessage(chatId, "Please send a valid selling price, like 15$ or $15.");
+      return true;
+    }
+
+    nextDraft = {
+      ...draft,
+      editingField: null,
+      sellingPrice,
+      updatedAt: now
+    };
+  }
+
+  if (draft.editingField === "buying_price") {
+    const buyingPrice = parseMoney(text);
+    if (buyingPrice === null) {
+      await sendTelegramMessage(chatId, "Please send a valid buying price, like 10 or $10.");
+      return true;
+    }
+
+    nextDraft = {
+      ...draft,
+      buyingPrice,
+      editingField: null,
+      updatedAt: now
+    };
+  }
+
+  if (!nextDraft) return false;
+
+  nextDraft = {
+    ...nextDraft,
+    stage: nextDraftStage(nextDraft)
+  };
+  nextDraft = await sendOrUpdateDraftPreview(chatId, nextDraft);
+  await saveDraft(key, nextDraft);
+  return true;
+}
+
 async function handleStockDraftMessage(chatId: number | string, userId: string, message: TelegramMessage, text: string) {
   const key = draftKey(chatId, userId);
   const imageFileIds = getImageFileIds(message);
   const settingsCategories = await listGameCategories();
   const existingDraft = await getDraft(key);
   const now = new Date().toISOString();
+
+  if (existingDraft?.editingField) {
+    return applyDraftEdit(chatId, key, existingDraft, text, settingsCategories);
+  }
 
   if (imageFileIds.length || (text && extractSecretCode(text))) {
     const parsed = text ? parseAccountText(text, settingsCategories) : null;
@@ -759,6 +866,51 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
     return;
   }
 
+  if (callback.data?.startsWith("stock:edit:")) {
+    const field = callback.data.replace("stock:edit:", "");
+
+    if (field === "back") {
+      await answerTelegramCallback(callback.id);
+      const updatedDraft = await sendOrUpdateDraftPreview(chatId, {
+        ...draft,
+        editingField: null,
+        stage: nextDraftStage(draft),
+        updatedAt: new Date().toISOString()
+      });
+      await saveDraft(key, updatedDraft);
+      return;
+    }
+
+    const editableFields: Record<string, NonNullable<TelegramStockDraft["editingField"]>> = {
+      buying_price: "buying_price",
+      private_note: "private_note",
+      selling_price: "selling_price",
+      title: "title"
+    };
+    const editingField = editableFields[field];
+
+    if (!editingField) {
+      await answerTelegramCallback(callback.id);
+      return;
+    }
+
+    const updatedDraft: TelegramStockDraft = {
+      ...draft,
+      editingField,
+      updatedAt: new Date().toISOString()
+    };
+    await saveDraft(key, updatedDraft);
+    await answerTelegramCallback(callback.id, "Send the new value.");
+    const labels: Record<NonNullable<TelegramStockDraft["editingField"]>, string> = {
+      buying_price: "buying price, like 10 or $10",
+      private_note: "private note",
+      selling_price: "selling price, like 15$ or $15",
+      title: "title with code, like ML# 1632 ..."
+    };
+    await sendTelegramMessage(chatId, `Send the new ${labels[editingField]}.`);
+    return;
+  }
+
   if (callback.data === "stock:delete") {
     await saveDraft(key, null);
     await answerTelegramCallback(callback.id, "Draft deleted.");
@@ -771,17 +923,21 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
   }
 
   if (callback.data === "stock:edit") {
-    await answerTelegramCallback(callback.id, "Send the corrected field.");
-    const updatedDraft = await sendOrUpdateDraftPreview(chatId, {
+    await answerTelegramCallback(callback.id, "Choose what to edit.");
+    const updatedDraft: TelegramStockDraft = {
       ...draft,
-      stage: nextDraftStage(draft),
+      editingField: null,
       updatedAt: new Date().toISOString()
-    });
+    };
     await saveDraft(key, updatedDraft);
-    await sendTelegramMessage(
-      chatId,
-      "Edit mode: send a corrected title/code, private note, selling price like 15$, or buying price like 10 or $10. The same preview will update."
-    );
+    const editText = `${draftPreviewText(updatedDraft)}\n\nChoose one field to edit.`;
+    if (draft.previewMessageId) {
+      const edited = await editTelegramMessageText(chatId, draft.previewMessageId, editText, {
+        reply_markup: draftEditMarkup()
+      });
+      if (edited) return;
+    }
+    await sendTelegramMessage(chatId, editText, { reply_markup: draftEditMarkup() });
     return;
   }
 
@@ -831,7 +987,8 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
 }
 
 export async function GET() {
-  return jsonOk({ service: "telegram-game-category-webhook" });
+  await setTelegramCommands();
+  return jsonOk({ commands: "registered", service: "telegram-game-category-webhook" });
 }
 
 export async function POST(request: Request) {
@@ -869,6 +1026,7 @@ export async function POST(request: Request) {
       return jsonOk({ handled: true });
     }
 
+    await setTelegramCommands();
     await handleStockCallback(callback, callbackChatId, callbackUserId);
     return jsonOk({ handled: true });
   }
@@ -886,8 +1044,9 @@ export async function POST(request: Request) {
     return jsonOk({ handled: true });
   }
 
+  await setTelegramCommands();
+
   if (isHelpCommand(text)) {
-    await setTelegramCommands();
     await sendTelegramMessage(
       chatId,
       "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current draft\n/cancelstock - delete current draft\n\nStock import: forward account screenshots/title, send Gmail/password private note, selling price, then buying price. I will show one preview with Approve/Edit/Delete."
