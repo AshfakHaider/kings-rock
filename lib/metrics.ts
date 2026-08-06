@@ -149,3 +149,13 @@ export function stockValueByGame(stockAccounts: StockAccount[]) {
   }
   return Array.from(buckets.values());
 }
+
+export function stockQuantityByGame(stockAccounts: StockAccount[]) {
+  const buckets = new Map<string, { game: string; count: number }>();
+  for (const account of stockAccounts.filter((item) => item.status !== "sold")) {
+    const item = buckets.get(account.game_name) ?? { game: account.game_name, count: 0 };
+    item.count += 1;
+    buckets.set(account.game_name, item);
+  }
+  return Array.from(buckets.values());
+}

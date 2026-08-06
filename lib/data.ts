@@ -42,6 +42,7 @@ import {
   monthlySeries,
   saleCashDate,
   salesBySource,
+  stockQuantityByGame,
   stockValueByGame
 } from "@/lib/metrics";
 import { normalizeCurrency } from "@/lib/utils";
@@ -323,6 +324,10 @@ function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnaps
     stockValueByGame: (snapshot.stockValueByGame ?? []).map((item) => ({
       game: item.game,
       value: Number(item.value)
+    })),
+    stockQuantityByGame: (snapshot.stockQuantityByGame ?? []).map((item) => ({
+      game: item.game,
+      count: Number(item.count)
     }))
   };
 }
@@ -361,15 +366,22 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
       monthlySeries: monthlySeries(visibleSoldAccounts),
       employeeProfitSeries: employeeProfitSeries(soldAccounts),
       salesBySource: salesBySource(visibleSoldAccounts),
-      stockValueByGame: stockValueByGame(stockAccounts)
+      stockValueByGame: stockValueByGame(stockAccounts),
+      stockQuantityByGame: stockQuantityByGame(stockAccounts)
     };
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("dashboard_snapshot");
+  const [{ data, error }, stockQuantitySummary] = await Promise.all([
+    supabase.rpc("dashboard_snapshot"),
+    getStockQuantityByGameSummary()
+  ]);
 
   if (!error && data) {
-    return normalizeDashboardSnapshot(data as DashboardSnapshot);
+    return normalizeDashboardSnapshot({
+      ...(data as DashboardSnapshot),
+      stockQuantityByGame: stockQuantitySummary
+    });
   }
 
   const [settings, stockAccounts, soldAccounts, gmailAccounts, expenses, advanceTransactions, currentProfile] =
@@ -404,7 +416,8 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     monthlySeries: monthlySeries(visibleSoldAccounts),
     employeeProfitSeries: employeeProfitSeries(soldAccounts),
     salesBySource: salesBySource(visibleSoldAccounts),
-    stockValueByGame: stockValueByGame(stockAccounts)
+    stockValueByGame: stockValueByGame(stockAccounts),
+    stockQuantityByGame: stockQuantityByGame(stockAccounts)
   };
 }
 
@@ -517,22 +530,29 @@ async function getDashboardSummaryFallback(options: DashboardPeriodOptions): Pro
     }),
     employeeProfitSeries: employeeProfitSeries(periodPaidSales),
     salesBySource: dashboardSalesBySource(visibleSoldAccounts).slice(0, 5),
-    stockValueByGame: stockValueByGame(activeStockAccounts).sort((a, b) => b.value - a.value).slice(0, 12)
+    stockValueByGame: stockValueByGame(activeStockAccounts).sort((a, b) => b.value - a.value).slice(0, 12),
+    stockQuantityByGame: stockQuantityByGame(activeStockAccounts).sort((a, b) => b.count - a.count).slice(0, 12)
   });
 }
 
 export async function getDashboardSummary(options: DashboardPeriodOptions): Promise<DashboardSnapshot> {
   if (!hasSupabaseEnv()) return getDashboardSummaryFallback(options);
 
-  const supabase = await createClient();
   const month = options.month === "all" ? null : options.month;
-  const { data, error } = await supabase.rpc("dashboard_summary", {
-    p_year: options.year,
-    p_month: month
-  });
+  const supabase = await createClient();
+  const [{ data, error }, stockQuantitySummary] = await Promise.all([
+    supabase.rpc("dashboard_summary", {
+      p_year: options.year,
+      p_month: month
+    }),
+    getStockQuantityByGameSummary()
+  ]);
 
   if (!error && data) {
-    return normalizeDashboardSnapshot(data as DashboardSnapshot);
+    return normalizeDashboardSnapshot({
+      ...(data as DashboardSnapshot),
+      stockQuantityByGame: stockQuantitySummary
+    });
   }
 
   return getDashboardSummaryFallback(options);
@@ -932,6 +952,26 @@ export async function getStockValueByGameSummary() {
   }
 
   return Array.from(buckets.values());
+}
+
+export async function getStockQuantityByGameSummary() {
+  if (!hasSupabaseEnv()) return stockQuantityByGame(await getStockAccounts());
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("stock_accounts")
+    .select("game_name")
+    .neq("status", "sold");
+  const rows = (data as Pick<StockAccount, "game_name">[]) ?? [];
+  const buckets = new Map<string, { game: string; count: number }>();
+
+  for (const account of rows) {
+    const item = buckets.get(account.game_name) ?? { game: account.game_name, count: 0 };
+    item.count += 1;
+    buckets.set(account.game_name, item);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => b.count - a.count).slice(0, 12);
 }
 
 export async function getMonthlyLeaderboard(year: number, month: number): Promise<LeaderboardEntry[]> {
