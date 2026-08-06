@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
-import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockTotals } from "@/lib/data";
+import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockGameNames, getStockTotals } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 import Link from "next/link";
@@ -38,17 +38,31 @@ function withPrivateNotesForCurrentUser<T extends { assigned_employee_id?: strin
   return { ...account, notes: null };
 }
 
-export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string; sort?: string }> }) {
+function uniqueGameOptions(...groups: Array<Array<string | null | undefined>>) {
+  return Array.from(
+    new Set(
+      groups
+        .flat()
+        .map((game) => game?.trim())
+        .filter((game): game is string => Boolean(game))
+    )
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+export default async function StockAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string; sort?: string; game?: string }> }) {
   const params = (await searchParams) ?? {};
   const page = Number(params.page ?? 1);
   const sort = params.sort === "oldest" ? "oldest" : "recent";
-  const [settings, stockPage, stockTotals, profiles, currentProfile] = await Promise.all([
+  const gameFilter = params.game?.trim() || null;
+  const [settings, stockPage, stockTotals, profiles, currentProfile, stockGameNames] = await Promise.all([
     getSettings(),
-    getStockAccountsPage({ page, pageSize: DEFAULT_PAGE_SIZE, q: params.q, excludeSold: true, sort }),
+    getStockAccountsPage({ page, pageSize: DEFAULT_PAGE_SIZE, q: params.q, excludeSold: true, sort, gameName: gameFilter }),
     getStockTotals({ excludeSold: true }),
     getProfiles(),
-    getCurrentProfile()
+    getCurrentProfile(),
+    getStockGameNames({ excludeSold: true })
   ]);
+  const gameOptions = uniqueGameOptions(settings.game_categories, stockGameNames);
   const visibleStockAccounts = stockPage.rows;
   const employees = profiles.filter((profile) => profile.role !== "admin" && profile.status === "active");
   const canViewBuyingPrice = currentProfile.role !== "employee";
@@ -87,17 +101,29 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
         pageSize={DEFAULT_PAGE_SIZE}
         totalRows={stockPage.total}
         serverSide
-        additionalQuery={{ sort }}
-        skipHiddenQueryKeys={["sort"]}
-        toolbarClassName="rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_auto]"
+        additionalQuery={{ sort, game: gameFilter }}
+        skipHiddenQueryKeys={["sort", "game"]}
+        toolbarClassName="rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,3fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_auto]"
         searchPlaceholder="Search by game, title, secret code, employee..."
         filters={
-          <div className="min-w-0">
-            <AutoSubmitSelect id="stock_sort" name="sort" defaultValue={sort} aria-label="Date filter">
-              <option value="recent">Recent to old</option>
-              <option value="oldest">Old to recent</option>
-            </AutoSubmitSelect>
-          </div>
+          <>
+            <div className="min-w-0">
+              <AutoSubmitSelect id="stock_game" name="game" defaultValue={gameFilter ?? ""} aria-label="Game filter">
+                <option value="">All games</option>
+                {gameOptions.map((game) => (
+                  <option key={game} value={game}>
+                    {game}
+                  </option>
+                ))}
+              </AutoSubmitSelect>
+            </div>
+            <div className="min-w-0">
+              <AutoSubmitSelect id="stock_sort" name="sort" defaultValue={sort} aria-label="Date filter">
+                <option value="recent">Recent to old</option>
+                <option value="oldest">Old to recent</option>
+              </AutoSubmitSelect>
+            </div>
+          </>
         }
         columns={[
           {

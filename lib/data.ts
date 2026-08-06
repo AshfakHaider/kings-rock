@@ -77,6 +77,7 @@ type PageOptions = {
 type StockPageOptions = PageOptions & {
   excludeSold?: boolean;
   assignedEmployeeId?: string | null;
+  gameName?: string | null;
   sort?: "recent" | "oldest";
 };
 
@@ -583,13 +584,14 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
 }
 
 export async function getStockAccountsPage(options: StockPageOptions = {}): Promise<PagedResult<StockAccount>> {
-  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, excludeSold = false, assignedEmployeeId = null, sort = "recent" } = options;
+  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, excludeSold = false, assignedEmployeeId = null, gameName = null, sort = "recent" } = options;
   const term = searchTerm(options.q);
 
   if (!hasSupabaseEnv()) {
     const rows = (await getStockAccounts()).filter((account) => {
       if (excludeSold && account.status === "sold") return false;
       if (assignedEmployeeId && account.assigned_employee_id !== assignedEmployeeId) return false;
+      if (gameName && account.game_name !== gameName) return false;
       if (!term) return true;
       return stockMatchesSearch(account, term);
     }).sort((a, b) => {
@@ -608,6 +610,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
 
   if (excludeSold) query = query.neq("status", "sold");
   if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
+  if (gameName) query = query.eq("game_name", gameName);
   if (term) {
     const rows: StockAccount[] = [];
     const batchSize = 1000;
@@ -617,6 +620,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
       let searchQuery = supabase.from("stock_accounts").select(STOCK_ACCOUNT_LIST_SELECT);
       if (excludeSold) searchQuery = searchQuery.neq("status", "sold");
       if (assignedEmployeeId) searchQuery = searchQuery.eq("assigned_employee_id", assignedEmployeeId);
+      if (gameName) searchQuery = searchQuery.eq("game_name", gameName);
 
       const { data } = await searchQuery
         .order("created_at", { ascending: sort === "oldest" })
@@ -637,6 +641,22 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     rows: (data as unknown as StockAccount[]) ?? [],
     total: count ?? 0
   };
+}
+
+export async function getStockGameNames(options: { excludeSold?: boolean } = {}) {
+  if (!hasSupabaseEnv()) {
+    const accounts = await getStockAccounts();
+    const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
+    return Array.from(new Set(rows.map((account) => account.game_name).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }
+
+  const supabase = await createClient();
+  let query = supabase.from("stock_accounts").select("game_name").order("game_name");
+  if (options.excludeSold) query = query.neq("status", "sold");
+  const { data } = await query;
+  return Array.from(
+    new Set(((data as Pick<StockAccount, "game_name">[]) ?? []).map((account) => account.game_name).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
 }
 
 export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
