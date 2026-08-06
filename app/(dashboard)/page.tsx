@@ -81,6 +81,7 @@ export default async function DashboardPage({
   const yearMonthlySeries = snapshot.monthlySeries;
   const filteredEmployeeSeries = snapshot.employeeProfitSeries;
   const currentStockQuantityByGame = snapshot.stockQuantityByGame;
+  const currentStockValueByGame = snapshot.stockValueByGame;
 
   return (
     <>
@@ -247,6 +248,12 @@ export default async function DashboardPage({
               data={currentStockQuantityByGame}
               xKey="game"
               bars={[{ key: "count", name: "Accounts", color: "#fb7185" }]}
+            />
+            <DeferredBarMetricChart
+              title="Stock value by game"
+              data={currentStockValueByGame}
+              xKey="game"
+              bars={[{ key: "value", name: "Stock value", color: "#a78bfa" }]}
             />
           </>
         ) : null}
