@@ -10,6 +10,9 @@ export const runtime = "nodejs";
 type TelegramMessage = {
   chat?: {
     id?: number | string;
+    title?: string;
+    type?: "private" | "group" | "supergroup" | "channel" | string;
+    username?: string;
   };
   caption?: string;
   document?: {
@@ -17,6 +20,7 @@ type TelegramMessage = {
     file_name?: string;
     mime_type?: string;
   };
+  date?: number;
   from?: {
     id?: number;
     first_name?: string;
@@ -61,6 +65,7 @@ type TelegramStockDraft = {
   createdAt: string;
   editingField?: "title" | "private_note" | "selling_price" | "buying_price" | null;
   gameName?: string;
+  groupQueueItemId?: string;
   imageFileIds: string[];
   buyingPrice?: number;
   mediaGroupId?: string;
@@ -75,6 +80,22 @@ type TelegramStockDraft = {
 
 type TelegramSentMessage = {
   message_id?: number;
+};
+
+type TelegramGroupStockQueueItem = {
+  accountTitle: string;
+  createdAt: string;
+  gameName: string;
+  id: string;
+  imageFileIds: string[];
+  mediaGroupId?: string;
+  secretCode?: string | null;
+  sellingPrice?: number;
+  sourceChatId: string;
+  sourceChatTitle?: string;
+  sourceMessageId?: number;
+  status: "pending";
+  updatedAt: string;
 };
 
 const DEFAULT_SETTINGS_PAYLOAD = {
@@ -131,6 +152,15 @@ function isCancelStockCommand(text: string) {
 
 function isDraftCommand(text: string) {
   return /^\/draft(?:@\w+)?$/i.test(text);
+}
+
+function isReviewMissingCommand(text: string) {
+  return /^\/(reviewmissing|missing|checkmissing)(?:@\w+)?$/i.test(text);
+}
+
+function isGroupChat(message: TelegramMessage) {
+  const chatType = message.chat?.type;
+  return chatType === "group" || chatType === "supergroup" || chatType === "channel";
 }
 
 function normalizeGameName(value: string) {
@@ -224,6 +254,7 @@ async function setTelegramCommands() {
         { command: "addstock", description: "Start a stock account draft" },
         { command: "games", description: "Show saved game names" },
         { command: "draft", description: "Show current stock draft" },
+        { command: "reviewmissing", description: "Review missing accounts found in groups" },
         { command: "cancelstock", description: "Delete current stock draft" }
       ]
     });
@@ -250,6 +281,24 @@ function getDrafts(settings: SettingsRow | null) {
   return drafts && typeof drafts === "object" && !Array.isArray(drafts)
     ? (drafts as Record<string, TelegramStockDraft>)
     : {};
+}
+
+function getGroupQueue(settings: SettingsRow | null) {
+  const permissions = settings?.employee_permissions;
+  const queue = permissions?.telegram_group_stock_queue;
+  return queue && typeof queue === "object" && !Array.isArray(queue)
+    ? (queue as Record<string, TelegramGroupStockQueueItem>)
+    : {};
+}
+
+function compactGroupQueue(queue: Record<string, TelegramGroupStockQueueItem>) {
+  return Object.fromEntries(
+    Object.values(queue)
+      .filter((item) => item.status === "pending")
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, 120)
+      .map((item) => [item.id, item])
+  );
 }
 
 function draftKey(chatId: number | string, userId: string) {
@@ -292,6 +341,68 @@ async function saveDraft(key: string, draft: TelegramStockDraft | null) {
 
 async function getDraft(key: string) {
   return getDrafts(await getSettings())[key] ?? null;
+}
+
+async function saveGroupQueueItem(item: TelegramGroupStockQueueItem | null) {
+  const supabase = createAdminClient();
+  const settings = await getSettings();
+
+  if (!settings) {
+    throw new Error("Settings row was not found. Add settings first from the app.");
+  }
+
+  const permissions = {
+    ...(settings.employee_permissions ?? {})
+  };
+  const queue = {
+    ...getGroupQueue(settings)
+  };
+
+  if (item) {
+    queue[item.id] = item;
+  }
+
+  const nextQueue = item ? compactGroupQueue(queue) : queue;
+  const nextPermissions = {
+    ...permissions,
+    telegram_group_stock_queue: nextQueue
+  };
+
+  const { error } = await supabase
+    .from("settings")
+    .update({ employee_permissions: nextPermissions })
+    .eq("id", settings.id);
+
+  if (error) throw new Error(error.message);
+}
+
+async function deleteGroupQueueItem(itemId: string) {
+  const supabase = createAdminClient();
+  const settings = await getSettings();
+
+  if (!settings) {
+    throw new Error("Settings row was not found. Add settings first from the app.");
+  }
+
+  const permissions = {
+    ...(settings.employee_permissions ?? {})
+  };
+  const queue = {
+    ...getGroupQueue(settings)
+  };
+  delete queue[itemId];
+
+  const { error } = await supabase
+    .from("settings")
+    .update({
+      employee_permissions: {
+        ...permissions,
+        telegram_group_stock_queue: queue
+      }
+    })
+    .eq("id", settings.id);
+
+  if (error) throw new Error(error.message);
 }
 
 async function addGameCategory(gameName: string) {
@@ -390,6 +501,32 @@ function parseSellingPrice(value: string) {
   return parseMoney(value);
 }
 
+function parseSellingPriceFromAccountText(value: string) {
+  const explicit = value
+    .replace(/,/g, "")
+    .match(/(?:selling|sell|price)\s*:?\s*\$?\s*(\d+(?:\.\d{1,2})?)\s*\$?/i);
+  if (explicit) {
+    const amount = Number(explicit[1]);
+    return Number.isFinite(amount) && amount >= 0 ? amount : null;
+  }
+
+  const dollarAmount = value
+    .replace(/,/g, "")
+    .match(/(?:^|\s)(?:\$+\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*\$+)(?:\s|$)/i);
+  const amountText = dollarAmount?.[1] ?? dollarAmount?.[2];
+  if (!amountText) return null;
+
+  const amount = Number(amountText);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
+function stripInlinePriceText(value: string) {
+  return value
+    .replace(/(?:selling|sell|price)\s*:?\s*\$?\s*\d+(?:\.\d{1,2})?\s*\$?/gi, "")
+    .replace(/(?:^|\s)(?:\$+\s*\d+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?\s*\$+)(?=\s|$)/gi, " ")
+    .trim();
+}
+
 function extractSecretCode(value: string) {
   const match = value.match(/^\s*([a-z]{2,8}\s*#\s*\d+)\b/i);
   if (!match) return null;
@@ -421,7 +558,7 @@ function inferGameName(secretCode: string | null | undefined, categories: string
 }
 
 function parseAccountText(value: string, categories: string[]) {
-  const cleaned = cleanStockText(value);
+  const cleaned = cleanStockText(stripInlinePriceText(value));
   const secretCode = extractSecretCode(cleaned);
   const accountTitle = secretCode ? stripSecretCodeFromTitle(cleaned, secretCode) : cleaned;
 
@@ -454,21 +591,40 @@ async function assertNoDuplicateStockAccount(secretCode: string | null | undefin
 
   if (error) throw new Error(error.message);
 
-  const requestedCode = normalizeStockIdentity(secretCode);
-  const requestedTitle = normalizeStockIdentity(accountTitle);
-  const duplicate = data?.find((account) => {
-    if (requestedCode && normalizeStockIdentity(account.secret_code) === requestedCode) return true;
-    return normalizeStockIdentity(account.account_title) === requestedTitle;
-  });
-
+  const duplicate = findDuplicateStockAccount(data ?? [], secretCode, accountTitle);
   if (!duplicate) return;
 
+  const requestedCode = normalizeStockIdentity(secretCode);
   const isCodeDuplicate = requestedCode && normalizeStockIdentity(duplicate.secret_code) === requestedCode;
   throw new Error(
     isCodeDuplicate
       ? "Duplicate stock account already exists with this secret code."
       : "Duplicate stock account already exists with this title."
   );
+}
+
+function findDuplicateStockAccount(
+  accounts: Array<{ account_title: string | null; id: string; secret_code: string | null; status?: string | null }>,
+  secretCode: string | null | undefined,
+  accountTitle: string
+) {
+  const requestedCode = normalizeStockIdentity(secretCode);
+  const requestedTitle = normalizeStockIdentity(accountTitle);
+  return accounts.find((account) => {
+    if (requestedCode && normalizeStockIdentity(account.secret_code) === requestedCode) return true;
+    return normalizeStockIdentity(account.account_title) === requestedTitle;
+  });
+}
+
+async function isDuplicateStockAccount(secretCode: string | null | undefined, accountTitle: string) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("stock_accounts")
+    .select("id,status,secret_code,account_title")
+    .neq("status", "sold");
+
+  if (error) throw new Error(error.message);
+  return Boolean(findDuplicateStockAccount(data ?? [], secretCode, accountTitle));
 }
 
 function dhakaToday() {
@@ -610,6 +766,14 @@ function draftPreviewMarkup() {
   };
 }
 
+function draftIncompleteMarkup() {
+  return {
+    inline_keyboard: [
+      [{ text: "Delete draft", callback_data: "stock:delete" }]
+    ]
+  };
+}
+
 function draftEditMarkup() {
   return {
     inline_keyboard: [
@@ -629,9 +793,37 @@ function draftEditMarkup() {
   };
 }
 
+function groupQueueItemText(item: TelegramGroupStockQueueItem, index?: number, total?: number) {
+  return [
+    typeof index === "number" && typeof total === "number" ? `Missing group account ${index + 1}/${total}` : "Missing group account",
+    "",
+    item.secretCode ? `Code: ${item.secretCode}` : "Code: missing",
+    `Game: ${item.gameName}`,
+    `Title: ${item.accountTitle}`,
+    `Images: ${item.imageFileIds.length}/15`,
+    typeof item.sellingPrice === "number" ? `Selling price: $${item.sellingPrice}` : "Selling price: missing",
+    item.sourceChatTitle ? `Source: ${item.sourceChatTitle}` : null,
+    "",
+    "Add to private draft, then send private note and buying price before approval."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function groupQueueMarkup(itemId: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Add to draft", callback_data: `group:review:${itemId}` },
+        { text: "Skip", callback_data: `group:skip:${itemId}` }
+      ]
+    ]
+  };
+}
+
 async function sendOrUpdateDraftPreview(chatId: number | string, draft: TelegramStockDraft) {
   const text = draftPreviewText(draft);
-  const extra = missingApprovalFields(draft).length ? {} : { reply_markup: draftPreviewMarkup() };
+  const extra = { reply_markup: missingApprovalFields(draft).length ? draftIncompleteMarkup() : draftPreviewMarkup() };
 
   if (draft.previewMessageId) {
     const edited = await editTelegramMessageText(chatId, draft.previewMessageId, text, extra);
@@ -640,6 +832,39 @@ async function sendOrUpdateDraftPreview(chatId: number | string, draft: Telegram
 
   const sent = await sendTelegramMessage(chatId, text, extra);
   return sent?.message_id ? { ...draft, previewMessageId: sent.message_id } : draft;
+}
+
+async function pendingGroupQueueItems() {
+  const queue = getGroupQueue(await getSettings());
+  return Object.values(queue).sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+}
+
+async function sendNextGroupQueueItem(chatId: number | string) {
+  const items = await pendingGroupQueueItems();
+
+  if (!items.length) {
+    await sendTelegramMessage(chatId, "No missing group accounts are waiting for review.");
+    return;
+  }
+
+  const item = items[0];
+  await sendTelegramMessage(chatId, groupQueueItemText(item, 0, items.length), {
+    reply_markup: groupQueueMarkup(item.id)
+  });
+}
+
+async function notifyAllowedUsersAboutGroupItem(item: TelegramGroupStockQueueItem) {
+  const allowedUserIds = [...getAllowedUserIds()];
+
+  await Promise.all(
+    allowedUserIds.map((allowedUserId) =>
+      sendTelegramMessage(allowedUserId, groupQueueItemText(item), {
+        reply_markup: groupQueueMarkup(item.id)
+      })
+    )
+  );
 }
 
 async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPrice: number) {
@@ -677,6 +902,92 @@ async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPric
   revalidatePath("/");
 
   return data;
+}
+
+function findGroupQueueDuplicate(
+  queue: Record<string, TelegramGroupStockQueueItem>,
+  sourceChatId: number | string | undefined,
+  mediaGroupId: string | undefined,
+  secretCode: string | null | undefined,
+  accountTitle: string
+) {
+  const requestedCode = normalizeStockIdentity(secretCode);
+  const requestedTitle = normalizeStockIdentity(accountTitle);
+  const source = sourceChatId ? String(sourceChatId) : "";
+
+  return Object.values(queue).find((item) => {
+    if (source && mediaGroupId && item.sourceChatId === source && item.mediaGroupId === mediaGroupId) return true;
+    if (requestedCode && normalizeStockIdentity(item.secretCode) === requestedCode) return true;
+    return normalizeStockIdentity(item.accountTitle) === requestedTitle;
+  });
+}
+
+async function handleGroupStockMessage(message: TelegramMessage, text: string) {
+  if (!isGroupChat(message)) return false;
+
+  const imageFileIds = getImageFileIds(message);
+  const settings = await getSettings();
+  const queue = getGroupQueue(settings);
+  const now = new Date().toISOString();
+  const sourceChatId = message.chat?.id;
+  const mediaGroupId = message.media_group_id;
+
+  if (!sourceChatId) return false;
+
+  if (!text && imageFileIds.length && mediaGroupId) {
+    const existingItem = Object.values(queue).find(
+      (item) => item.sourceChatId === String(sourceChatId) && item.mediaGroupId === mediaGroupId
+    );
+
+    if (!existingItem) return false;
+
+    await saveGroupQueueItem({
+      ...existingItem,
+      imageFileIds: [...new Set([...existingItem.imageFileIds, ...imageFileIds])].slice(0, 15),
+      updatedAt: now
+    });
+    return true;
+  }
+
+  const secretCode = text ? extractSecretCode(text) : null;
+  if (!secretCode) return false;
+
+  const settingsCategories = Array.isArray(settings?.game_categories) ? settings.game_categories : [];
+  const parsed = parseAccountText(text, settingsCategories);
+  const duplicateStock = await isDuplicateStockAccount(parsed.secretCode, parsed.accountTitle);
+  if (duplicateStock) return true;
+
+  const duplicateQueueItem = findGroupQueueDuplicate(
+    queue,
+    sourceChatId,
+    mediaGroupId,
+    parsed.secretCode,
+    parsed.accountTitle
+  );
+  const sellingPrice = parseSellingPriceFromAccountText(text);
+  const item: TelegramGroupStockQueueItem = {
+    accountTitle: parsed.accountTitle,
+    createdAt: duplicateQueueItem?.createdAt ?? now,
+    gameName: parsed.gameName,
+    id: duplicateQueueItem?.id ?? randomUUID(),
+    imageFileIds: [...new Set([...(duplicateQueueItem?.imageFileIds ?? []), ...imageFileIds])].slice(0, 15),
+    mediaGroupId,
+    secretCode: parsed.secretCode,
+    sellingPrice: sellingPrice ?? duplicateQueueItem?.sellingPrice,
+    sourceChatId: String(sourceChatId),
+    sourceChatTitle: message.chat?.title ?? message.chat?.username,
+    sourceMessageId: message.message_id,
+    status: "pending",
+    updatedAt: now
+  };
+
+  await saveGroupQueueItem(item);
+
+  if (!duplicateQueueItem) {
+    await notifyAllowedUsersAboutGroupItem(item);
+  }
+
+  return true;
 }
 
 async function applyDraftEdit(chatId: number | string, key: string, draft: TelegramStockDraft, text: string, settingsCategories: string[]) {
@@ -856,9 +1167,70 @@ async function startStockDraft(chatId: number | string, userId: string) {
   await saveDraft(key, draft);
 }
 
+async function createDraftFromGroupQueueItem(chatId: number | string, userId: string, item: TelegramGroupStockQueueItem) {
+  const now = new Date().toISOString();
+  let draft: TelegramStockDraft = {
+    accountTitle: item.accountTitle,
+    buyingPrice: undefined,
+    chatId: String(chatId),
+    createdAt: now,
+    gameName: item.gameName,
+    groupQueueItemId: item.id,
+    id: randomUUID(),
+    imageFileIds: item.imageFileIds,
+    mediaGroupId: item.mediaGroupId,
+    note: undefined,
+    secretCode: item.secretCode,
+    sellingPrice: item.sellingPrice,
+    stage: "collecting",
+    updatedAt: now,
+    userId
+  };
+
+  draft = {
+    ...draft,
+    stage: nextDraftStage(draft)
+  };
+  draft = await sendOrUpdateDraftPreview(chatId, draft);
+  await saveDraft(draftKey(chatId, userId), draft);
+}
+
 async function handleStockCallback(callback: TelegramCallbackQuery, chatId: number | string, userId: string) {
   const key = draftKey(chatId, userId);
   const draft = await getDraft(key);
+
+  if (callback.data?.startsWith("group:")) {
+    const [, action, itemId] = callback.data.split(":");
+    const item = getGroupQueue(await getSettings())[itemId];
+
+    if (!item) {
+      await answerTelegramCallback(callback.id, "This missing account is no longer available.");
+      await sendNextGroupQueueItem(chatId);
+      return;
+    }
+
+    if (action === "skip") {
+      await deleteGroupQueueItem(item.id);
+      await answerTelegramCallback(callback.id, "Skipped.");
+      if (callback.message?.message_id) {
+        await editTelegramMessageText(chatId, callback.message.message_id, "Missing account skipped.");
+      }
+      await sendNextGroupQueueItem(chatId);
+      return;
+    }
+
+    if (action === "review") {
+      await createDraftFromGroupQueueItem(chatId, userId, item);
+      await answerTelegramCallback(callback.id, "Added to private draft.");
+      if (callback.message?.message_id) {
+        await editTelegramMessageText(chatId, callback.message.message_id, "Added to private draft. Complete the missing fields in the latest preview.");
+      }
+      return;
+    }
+
+    await answerTelegramCallback(callback.id);
+    return;
+  }
 
   if (!draft) {
     await answerTelegramCallback(callback.id, "No active stock draft.");
@@ -961,6 +1333,9 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
   try {
     const created = await createStockAccountFromDraft(draft, draft.buyingPrice ?? 0);
     await saveDraft(key, null);
+    if (draft.groupQueueItemId) {
+      await deleteGroupQueueItem(draft.groupQueueItemId);
+    }
     await answerTelegramCallback(callback.id, "Stock account added.");
     const successMessage = [
       "Stock account added.",
@@ -976,6 +1351,9 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
       await editTelegramMessageText(chatId, draft.previewMessageId, successMessage);
     } else {
       await sendTelegramMessage(chatId, successMessage);
+    }
+    if (draft.groupQueueItemId) {
+      await sendNextGroupQueueItem(chatId);
     }
   } catch (error) {
     await answerTelegramCallback(callback.id, "Could not add stock account.");
@@ -1033,14 +1411,21 @@ export async function POST(request: Request) {
 
   if (!chatId || (!text && !getImageFileIds(message ?? {}).length)) return jsonOk();
 
-  const allowedUserIds = getAllowedUserIds();
-  if (!allowedUserIds.size || !allowedUserIds.has(userId)) {
-    await sendTelegramMessage(chatId, "You are not allowed to add games to Kings Rock.");
+  if (!hasSupabaseEnv() || !hasSupabaseAdminEnv()) {
+    if (!message || !isGroupChat(message)) {
+      await sendTelegramMessage(chatId, "Kings Rock bot is missing Supabase server environment variables.");
+    }
     return jsonOk({ handled: true });
   }
 
-  if (!hasSupabaseEnv() || !hasSupabaseAdminEnv()) {
-    await sendTelegramMessage(chatId, "Kings Rock bot is missing Supabase server environment variables.");
+  if (message && isGroupChat(message)) {
+    await handleGroupStockMessage(message, text);
+    return jsonOk({ handled: true });
+  }
+
+  const allowedUserIds = getAllowedUserIds();
+  if (!allowedUserIds.size || !allowedUserIds.has(userId)) {
+    await sendTelegramMessage(chatId, "You are not allowed to add games to Kings Rock.");
     return jsonOk({ handled: true });
   }
 
@@ -1049,7 +1434,7 @@ export async function POST(request: Request) {
   if (isHelpCommand(text)) {
     await sendTelegramMessage(
       chatId,
-      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current draft\n/cancelstock - delete current draft\n\nStock import: forward account screenshots/title, send Gmail/password private note, selling price, then buying price. I will show one preview with Approve/Edit/Delete."
+      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, send Gmail/password private note, selling price, then buying price.\n\nGroup scanner: add me to a group and disable BotFather privacy mode. I will collect missing account posts privately for review."
     );
     return jsonOk({ handled: true });
   }
@@ -1077,6 +1462,11 @@ export async function POST(request: Request) {
       chatId,
       gameCategories.length ? `Current games:\n${gameCategories.join("\n")}` : "No games found yet."
     );
+    return jsonOk({ handled: true });
+  }
+
+  if (isReviewMissingCommand(text)) {
+    await sendNextGroupQueueItem(chatId);
     return jsonOk({ handled: true });
   }
 
