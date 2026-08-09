@@ -1,4 +1,5 @@
 import { deleteSale, markSalePaid } from "@/app/actions";
+import { AutoSubmitSelect } from "@/components/modules/auto-submit-select";
 import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
@@ -9,9 +10,22 @@ import { getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
-export default async function SoldAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string }> }) {
+function uniqueGameOptions(...groups: Array<Array<string | null | undefined>>) {
+  return Array.from(
+    new Set(
+      groups
+        .flat()
+        .map((game) => game?.trim())
+        .filter((game): game is string => Boolean(game))
+    )
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+export default async function SoldAccountsPage({ searchParams }: { searchParams?: Promise<{ q?: string; page?: string; sort?: string; game?: string }> }) {
   const params = (await searchParams) ?? {};
   const page = Number(params.page ?? 1);
+  const sort = params.sort === "oldest" ? "oldest" : "recent";
+  const gameFilter = params.game?.trim() || null;
   const [settings, allSoldAccounts, currentProfile] = await Promise.all([
     getSettings(),
     getSoldAccounts(),
@@ -23,24 +37,60 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
     currentProfile.role === "employee"
       ? allSoldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
       : allSoldAccounts;
+  const gameOptions = uniqueGameOptions(
+    settings.game_categories,
+    soldAccounts.map((sale) => sale.stock_account?.game_name)
+  );
+  const filteredSoldAccounts = gameFilter
+    ? soldAccounts.filter((sale) => sale.stock_account?.game_name === gameFilter)
+    : soldAccounts;
   const [soldPage, waitingPage] = await Promise.all([
     getSoldAccountsPage({
       page,
       pageSize: DEFAULT_PAGE_SIZE,
       q: params.q,
-      employeeId: currentProfile.role === "employee" ? currentProfile.id : null
+      employeeId: currentProfile.role === "employee" ? currentProfile.id : null,
+      gameName: gameFilter,
+      sort
     }),
     getSoldAccountsPage({
       page,
       pageSize: DEFAULT_PAGE_SIZE,
       q: params.q,
       employeeId: currentProfile.role === "employee" ? currentProfile.id : null,
-      paymentStatus: "not_paid"
+      gameName: gameFilter,
+      paymentStatus: "not_paid",
+      sort
     })
   ]);
   const waitingSoldAccounts = waitingPage.rows;
-  const sourceRows = salesBySource(soldAccounts);
+  const sourceRows = salesBySource(filteredSoldAccounts);
   type SoldRow = (typeof soldPage.rows)[number];
+  const toolbarClassName = "rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,3fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_auto]";
+  const additionalQuery = { sort, game: gameFilter };
+
+  function renderFilters(idPrefix: string) {
+    return (
+      <>
+        <div className="min-w-0">
+          <AutoSubmitSelect id={`${idPrefix}_game`} name="game" defaultValue={gameFilter ?? ""} aria-label="Game filter">
+            <option value="">All games</option>
+            {gameOptions.map((game) => (
+              <option key={game} value={game}>
+                {game}
+              </option>
+            ))}
+          </AutoSubmitSelect>
+        </div>
+        <div className="min-w-0">
+          <AutoSubmitSelect id={`${idPrefix}_sort`} name="sort" defaultValue={sort} aria-label="Date filter">
+            <option value="recent">Recent to old</option>
+            <option value="oldest">Old to recent</option>
+          </AutoSubmitSelect>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -64,7 +114,11 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
           pageSize={DEFAULT_PAGE_SIZE}
           totalRows={waitingPage.total}
           serverSide
-          searchPlaceholder="Search waiting payments..."
+          additionalQuery={additionalQuery}
+          skipHiddenQueryKeys={["sort", "game"]}
+          toolbarClassName={toolbarClassName}
+          searchPlaceholder="Search by game, title, secret code, employee..."
+          filters={renderFilters("waiting_sales")}
           emptyTitle="No waiting payments"
           emptyDescription="Newly sold accounts will appear here until payment is received."
           columns={[
@@ -123,7 +177,11 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
         pageSize={DEFAULT_PAGE_SIZE}
         totalRows={soldPage.total}
         serverSide
-        searchPlaceholder="Search sales by account, employee, buyer, source..."
+        additionalQuery={additionalQuery}
+        skipHiddenQueryKeys={["sort", "game"]}
+        toolbarClassName={toolbarClassName}
+        searchPlaceholder="Search by game, title, secret code, employee..."
+        filters={renderFilters("sold_sales")}
         columns={[
           {
             key: "account",

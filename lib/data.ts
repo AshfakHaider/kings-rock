@@ -89,7 +89,9 @@ type ExpensePageOptions = PageOptions & {
 
 type SoldPageOptions = PageOptions & {
   employeeId?: string | null;
+  gameName?: string | null;
   paymentStatus?: "paid" | "pending" | "partial" | "not_paid";
+  sort?: "recent" | "oldest";
 };
 
 type DashboardPeriodOptions = {
@@ -148,6 +150,32 @@ function stockMatchesSearch(account: StockAccount, term: string) {
     account.notes,
     account.assigned_employee?.name,
     account.assigned_employee?.email
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const normalizedHaystack = normalizedSearchText(haystack);
+
+  if (haystack.includes(plainNeedle)) return true;
+  if (normalizedNeedle && normalizedHaystack.includes(normalizedNeedle)) return true;
+  return pieces.length > 0 && pieces.every((piece) => haystack.includes(piece) || normalizedHaystack.includes(piece));
+}
+
+function soldMatchesSearch(sale: SoldAccount, term: string) {
+  const plainNeedle = term.toLowerCase();
+  const normalizedNeedle = normalizedSearchText(term);
+  const pieces = searchPieces(term);
+  const haystack = [
+    sale.stock_account?.secret_code,
+    sale.stock_account?.account_title,
+    sale.stock_account?.game_name,
+    sale.employee?.name,
+    sale.employee?.email,
+    sale.sold_source_website,
+    sale.buyer_contact,
+    sale.payment_status,
+    sale.payment_method,
+    sale.notes
   ]
     .filter(Boolean)
     .join(" ")
@@ -755,17 +783,21 @@ export async function getSoldAccounts(): Promise<SoldAccount[]> {
 }
 
 export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promise<PagedResult<SoldAccount>> {
-  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, employeeId = null, paymentStatus } = options;
+  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, employeeId = null, gameName = null, paymentStatus, sort = "recent" } = options;
   const term = searchTerm(options.q);
 
   if (!hasSupabaseEnv()) {
     const rows = (await getSoldAccounts()).filter((sale) => {
       if (employeeId && sale.employee_id !== employeeId) return false;
+      if (gameName && sale.stock_account?.game_name !== gameName) return false;
       if (paymentStatus === "not_paid" && sale.payment_status === "paid") return false;
       if (paymentStatus && paymentStatus !== "not_paid" && sale.payment_status !== paymentStatus) return false;
       if (!term) return true;
-      const haystack = `${sale.stock_account?.secret_code ?? ""} ${sale.stock_account?.account_title ?? ""} ${sale.stock_account?.game_name ?? ""} ${sale.employee?.name ?? ""} ${sale.employee?.email ?? ""} ${sale.sold_source_website ?? ""} ${sale.buyer_contact ?? ""} ${sale.payment_status}`.toLowerCase();
-      return haystack.includes(term.toLowerCase());
+      return soldMatchesSearch(sale, term);
+    }).sort((a, b) => {
+      const left = new Date(a.sold_date ?? a.created_at).getTime();
+      const right = new Date(b.sold_date ?? b.created_at).getTime();
+      return sort === "oldest" ? left - right : right - left;
     });
     return paginateMemory(rows, page, pageSize);
   }
@@ -779,24 +811,37 @@ export async function getSoldAccountsPage(options: SoldPageOptions = {}): Promis
   if (employeeId) query = query.eq("employee_id", employeeId);
   if (paymentStatus === "not_paid") query = query.neq("payment_status", "paid");
   if (paymentStatus && paymentStatus !== "not_paid") query = query.eq("payment_status", paymentStatus);
-  if (term) {
-    const [employeeIds, stockAccountIds] = await Promise.all([
-      getProfileIdsMatchingTerm(supabase, term),
-      getStockAccountIdsMatchingTerm(supabase, term)
-    ]);
-    const conditions = [
-      `sold_source_website.ilike.%${term}%`,
-      `buyer_contact.ilike.%${term}%`,
-      `payment_status.ilike.%${term}%`,
-      `notes.ilike.%${term}%`,
-      inFilter("employee_id", employeeIds),
-      inFilter("stock_account_id", stockAccountIds)
-    ].filter(Boolean);
 
-    query = query.or(conditions.join(","));
+  if (term || gameName) {
+    const rows: SoldAccount[] = [];
+    const batchSize = 1000;
+    let offset = 0;
+
+    while (offset < 20000) {
+      let searchQuery = supabase.from("sold_accounts").select(SOLD_ACCOUNT_SELECT);
+      if (employeeId) searchQuery = searchQuery.eq("employee_id", employeeId);
+      if (paymentStatus === "not_paid") searchQuery = searchQuery.neq("payment_status", "paid");
+      if (paymentStatus && paymentStatus !== "not_paid") searchQuery = searchQuery.eq("payment_status", paymentStatus);
+
+      const { data } = await searchQuery
+        .order("sold_date", { ascending: sort === "oldest" })
+        .range(offset, offset + batchSize - 1);
+      const batch = (data as unknown as SoldAccount[]) ?? [];
+
+      rows.push(...batch);
+      if (batch.length < batchSize) break;
+      offset += batchSize;
+    }
+
+    const matchedRows = rows.filter((sale) => {
+      if (gameName && sale.stock_account?.game_name !== gameName) return false;
+      if (!term) return true;
+      return soldMatchesSearch(sale, term);
+    });
+    return paginateMemory(matchedRows, page, pageSize);
   }
 
-  const { data, count } = await query.order("sold_date", { ascending: false }).range(from, to);
+  const { data, count } = await query.order("sold_date", { ascending: sort === "oldest" }).range(from, to);
   return {
     rows: (data as unknown as SoldAccount[]) ?? [],
     total: count ?? 0
