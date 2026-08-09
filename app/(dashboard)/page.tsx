@@ -240,6 +240,7 @@ export default async function DashboardPage({
               title="Employee profit comparison"
               data={filteredEmployeeSeries}
               xKey="name"
+              layout="horizontal"
               bars={[
                 { key: "profit", name: "Profit", color: "#22c55e" },
                 { key: "sales", name: "Sales", color: "#38bdf8" }
@@ -249,24 +250,28 @@ export default async function DashboardPage({
               title="Stock quantity by game"
               data={currentStockQuantityByGame}
               xKey="game"
+              layout="horizontal"
               bars={[{ key: "count", name: "Accounts", color: "#fb7185" }]}
             />
             <DeferredBarMetricChart
               title="Stock value by game"
               data={currentStockValueByGame}
               xKey="game"
+              layout="horizontal"
               bars={[{ key: "value", name: "Stock value", color: "#a78bfa" }]}
             />
             <DeferredBarMetricChart
               title={`Paid sold quantity by game (${periodLabel})`}
               data={paidSoldQuantityByGame}
               xKey="game"
+              layout="horizontal"
               bars={[{ key: "count", name: "Sold accounts", color: "#38bdf8" }]}
             />
             <DeferredBarMetricChart
               title={`Paid sold value by game (${periodLabel})`}
               data={paidSoldValueByGame}
               xKey="game"
+              layout="horizontal"
               bars={[{ key: "value", name: "Paid sold value", color: "#22c55e" }]}
             />
           </>

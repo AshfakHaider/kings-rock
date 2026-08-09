@@ -8,6 +8,8 @@ type BarMetricChartProps = {
   data: Record<string, unknown>[];
   xKey: string;
   bars: { key: string; color: string; name: string }[];
+  layout?: "vertical" | "horizontal";
+  className?: string;
 };
 
 const LazyBarMetricChart = dynamic(
