@@ -60,19 +60,4 @@
       radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.14), transparent 28%),
       hsl(var(--card));
   }
-
-  .chart-panel {
-    background:
-      linear-gradient(145deg, rgba(20, 184, 166, 0.12), transparent 30%),
-      radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.13), transparent 30%),
-      hsl(var(--card));
-  }
-
-  .chart-panel .recharts-text {
-    fill: hsl(var(--muted-foreground));
-  }
-
-  .chart-panel .recharts-cartesian-axis-tick-value {
-    font-weight: 500;
-  }
 }
