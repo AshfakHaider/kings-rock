@@ -210,5 +210,7 @@ export type DashboardSnapshot = {
   employeeProfitSeries: Array<{ name: string; profit: number; sales: number }>;
   stockValueByGame: Array<{ game: string; value: number }>;
   stockQuantityByGame: Array<{ game: string; count: number }>;
+  soldValueByGame: Array<{ game: string; value: number }>;
+  soldQuantityByGame: Array<{ game: string; count: number }>;
   salesBySource: Array<{ source: string; soldCount: number; totalSales: number; profit: number }>;
 };

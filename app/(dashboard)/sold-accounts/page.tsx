@@ -6,7 +6,7 @@ import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_PAGE_SIZE, getCurrentProfile, getSettings, getSoldAccounts, getSoldAccountsPage } from "@/lib/data";
-import { getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
+import { gameSalesSummary, getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -65,6 +65,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
   ]);
   const waitingSoldAccounts = waitingPage.rows;
   const sourceRows = salesBySource(filteredSoldAccounts);
+  const gameSummaryRows = gameSalesSummary(filteredSoldAccounts);
   type SoldRow = (typeof soldPage.rows)[number];
   const toolbarClassName = "rounded-lg border bg-card p-4 shadow-soft sm:grid-cols-[minmax(0,3fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_auto]";
   const additionalQuery = { sort, game: gameFilter };
@@ -144,6 +145,36 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
                   )
                 } as const]
               : [])
+          ]}
+        />
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold">Game Sales Summary</h2>
+          <p className="text-sm text-muted-foreground">
+            Paid value is received money. Waiting value is platform payout not received yet.
+          </p>
+        </div>
+        <ResponsiveTable
+          rows={gameSummaryRows}
+          paginate={false}
+          searchPlaceholder="Search games..."
+          emptyTitle="No game sales yet"
+          emptyDescription="When accounts are sold, game totals will appear here."
+          columns={[
+            { key: "game", header: "Game", cell: (row) => row.game, searchValue: (row) => row.game },
+            { key: "paidCount", header: "Paid sold", cell: (row) => row.paidCount },
+            { key: "paidValue", header: "Paid sold value", cell: (row) => money(row.paidValue, settings.currency) },
+            { key: "waitingCount", header: "Waiting", cell: (row) => row.waitingCount },
+            { key: "waitingValue", header: "Waiting value", cell: (row) => money(row.waitingValue, settings.currency) },
+            ...(canViewProfit
+              ? [
+                  { key: "buyingCost", header: "Buying cost", cell: (row: (typeof gameSummaryRows)[number]) => money(row.buyingCost, settings.currency) },
+                  { key: "profit", header: "Profit", cell: (row: (typeof gameSummaryRows)[number]) => money(row.profit, settings.currency) }
+                ] as const
+              : []),
+            { key: "averagePaidSale", header: "Avg paid sale", cell: (row) => money(row.averagePaidSale, settings.currency) }
           ]}
         />
       </section>

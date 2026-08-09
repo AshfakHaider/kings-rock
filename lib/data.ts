@@ -38,6 +38,8 @@ import {
   employeeProfitSeries,
   getProfit,
   getDashboardMetrics,
+  soldQuantityByGame,
+  soldValueByGame,
   isPaidSale,
   monthlySeries,
   saleCashDate,
@@ -357,6 +359,14 @@ function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnaps
     stockQuantityByGame: (snapshot.stockQuantityByGame ?? []).map((item) => ({
       game: item.game,
       count: Number(item.count)
+    })),
+    soldValueByGame: (snapshot.soldValueByGame ?? []).map((item) => ({
+      game: item.game,
+      value: Number(item.value)
+    })),
+    soldQuantityByGame: (snapshot.soldQuantityByGame ?? []).map((item) => ({
+      game: item.game,
+      count: Number(item.count)
     }))
   };
 }
@@ -396,7 +406,9 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
       employeeProfitSeries: employeeProfitSeries(soldAccounts),
       salesBySource: salesBySource(visibleSoldAccounts),
       stockValueByGame: stockValueByGame(stockAccounts),
-      stockQuantityByGame: stockQuantityByGame(stockAccounts)
+      stockQuantityByGame: stockQuantityByGame(stockAccounts),
+      soldValueByGame: soldValueByGame(visibleSoldAccounts).sort((a, b) => b.value - a.value).slice(0, 12),
+      soldQuantityByGame: soldQuantityByGame(visibleSoldAccounts).sort((a, b) => b.count - a.count).slice(0, 12)
     };
   }
 
@@ -446,7 +458,9 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     employeeProfitSeries: employeeProfitSeries(soldAccounts),
     salesBySource: salesBySource(visibleSoldAccounts),
     stockValueByGame: stockValueByGame(stockAccounts),
-    stockQuantityByGame: stockQuantityByGame(stockAccounts)
+    stockQuantityByGame: stockQuantityByGame(stockAccounts),
+    soldValueByGame: soldValueByGame(visibleSoldAccounts).sort((a, b) => b.value - a.value).slice(0, 12),
+    soldQuantityByGame: soldQuantityByGame(visibleSoldAccounts).sort((a, b) => b.count - a.count).slice(0, 12)
   };
 }
 
@@ -560,7 +574,9 @@ async function getDashboardSummaryFallback(options: DashboardPeriodOptions): Pro
     employeeProfitSeries: employeeProfitSeries(periodPaidSales),
     salesBySource: dashboardSalesBySource(visibleSoldAccounts).slice(0, 5),
     stockValueByGame: stockValueByGame(activeStockAccounts).sort((a, b) => b.value - a.value).slice(0, 12),
-    stockQuantityByGame: stockQuantityByGame(activeStockAccounts).sort((a, b) => b.count - a.count).slice(0, 12)
+    stockQuantityByGame: stockQuantityByGame(activeStockAccounts).sort((a, b) => b.count - a.count).slice(0, 12),
+    soldValueByGame: soldValueByGame(periodPaidSales).sort((a, b) => b.value - a.value).slice(0, 12),
+    soldQuantityByGame: soldQuantityByGame(periodPaidSales).sort((a, b) => b.count - a.count).slice(0, 12)
   });
 }
 
@@ -569,18 +585,25 @@ export async function getDashboardSummary(options: DashboardPeriodOptions): Prom
 
   const month = options.month === "all" ? null : options.month;
   const supabase = await createClient();
-  const [{ data, error }, stockQuantitySummary] = await Promise.all([
+  const [{ data, error }, stockQuantitySummary, currentProfile] = await Promise.all([
     supabase.rpc("dashboard_summary", {
       p_year: options.year,
       p_month: month
     }),
-    getStockQuantityByGameSummary()
+    getStockQuantityByGameSummary(),
+    getCurrentProfile()
   ]);
+  const paidGameSales = await getDashboardPaidSales({
+    ...options,
+    employeeId: currentProfile.role === "employee" ? currentProfile.id : null
+  });
 
   if (!error && data) {
     return normalizeDashboardSnapshot({
       ...(data as DashboardSnapshot),
-      stockQuantityByGame: stockQuantitySummary
+      stockQuantityByGame: stockQuantitySummary,
+      soldValueByGame: soldValueByGame(paidGameSales).sort((a, b) => b.value - a.value).slice(0, 12),
+      soldQuantityByGame: soldQuantityByGame(paidGameSales).sort((a, b) => b.count - a.count).slice(0, 12)
     });
   }
 

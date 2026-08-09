@@ -140,6 +140,82 @@ export function salesBySource(sales: SoldAccount[]) {
   return Array.from(buckets.values()).sort((a, b) => b.soldCount - a.soldCount || b.totalSales - a.totalSales);
 }
 
+export function soldQuantityByGame(sales: SoldAccount[]) {
+  const buckets = new Map<string, { game: string; count: number }>();
+
+  for (const sale of paidSales(sales)) {
+    const game = sale.stock_account?.game_name?.trim() || "Unknown";
+    const item = buckets.get(game.toLowerCase()) ?? { game, count: 0 };
+    item.count += 1;
+    buckets.set(game.toLowerCase(), item);
+  }
+
+  return Array.from(buckets.values());
+}
+
+export function soldValueByGame(sales: SoldAccount[]) {
+  const buckets = new Map<string, { game: string; value: number }>();
+
+  for (const sale of paidSales(sales)) {
+    const game = sale.stock_account?.game_name?.trim() || "Unknown";
+    const item = buckets.get(game.toLowerCase()) ?? { game, value: 0 };
+    item.value += Number(sale.sold_amount);
+    buckets.set(game.toLowerCase(), item);
+  }
+
+  return Array.from(buckets.values());
+}
+
+export function gameSalesSummary(sales: SoldAccount[]) {
+  const buckets = new Map<
+    string,
+    {
+      game: string;
+      paidCount: number;
+      paidValue: number;
+      waitingCount: number;
+      waitingValue: number;
+      buyingCost: number;
+      profit: number;
+      averagePaidSale: number;
+    }
+  >();
+
+  for (const sale of sales) {
+    const game = sale.stock_account?.game_name?.trim() || "Unknown";
+    const key = game.toLowerCase();
+    const item = buckets.get(key) ?? {
+      game,
+      paidCount: 0,
+      paidValue: 0,
+      waitingCount: 0,
+      waitingValue: 0,
+      buyingCost: 0,
+      profit: 0,
+      averagePaidSale: 0
+    };
+
+    if (isPaidSale(sale)) {
+      item.paidCount += 1;
+      item.paidValue += Number(sale.sold_amount);
+      item.buyingCost += Number(sale.stock_account?.buying_price ?? 0);
+      item.profit += getProfit(sale);
+    } else {
+      item.waitingCount += 1;
+      item.waitingValue += Number(sale.sold_amount);
+    }
+
+    item.averagePaidSale = item.paidCount > 0 ? item.paidValue / item.paidCount : 0;
+    buckets.set(key, item);
+  }
+
+  return Array.from(buckets.values()).sort(
+    (a, b) =>
+      b.paidCount + b.waitingCount - (a.paidCount + a.waitingCount) ||
+      b.paidValue + b.waitingValue - (a.paidValue + a.waitingValue)
+  );
+}
+
 export function stockValueByGame(stockAccounts: StockAccount[]) {
   const buckets = new Map<string, { game: string; value: number }>();
   for (const account of stockAccounts.filter((item) => item.status !== "sold")) {
