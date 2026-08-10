@@ -844,10 +844,49 @@ export async function getStockGameNames(options: { excludeSold?: boolean } = {})
 }
 
 export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
-  const accounts = await getStockAccounts();
-  const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
-  const assignedCount = rows.filter((account) => account.status === "assigned" || hasAnyAssignment(account)).length;
-  const availableCount = rows.filter((account) => account.status === "available" && !hasAnyAssignment(account)).length;
+  if (!hasSupabaseEnv()) {
+    const accounts = await getStockAccounts();
+    const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
+    const assignedCount = rows.filter((account) => account.status === "assigned" || hasAnyAssignment(account)).length;
+    const availableCount = rows.filter((account) => account.status === "available" && !hasAnyAssignment(account)).length;
+
+    return {
+      availableCount,
+      assignedCount,
+      activeCount: availableCount + assignedCount,
+      buyingValue: rows.reduce((total, account) => total + Number(account.buying_price), 0),
+      sellingValue: rows.reduce((total, account) => total + Number(account.selling_price ?? 0), 0)
+    };
+  }
+
+  const supabase = await createClient();
+  let stockQuery = supabase.from("stock_accounts").select("id,status,buying_price,selling_price,assigned_employee_id");
+  if (options.excludeSold) stockQuery = stockQuery.neq("status", "sold");
+  const { data: stockData } = await stockQuery;
+  const rows = (stockData as Array<Pick<StockAccount, "id" | "status" | "buying_price" | "selling_price" | "assigned_employee_id">>) ?? [];
+  const rowIds = new Set(rows.map((account) => account.id));
+  const assignmentIds = new Set<string>();
+
+  try {
+    const { data: assignmentData, error } = await supabase
+      .from("stock_account_assignments")
+      .select("stock_account_id");
+
+    if (!error) {
+      for (const assignment of (assignmentData as Array<{ stock_account_id: string }> | null) ?? []) {
+        if (rowIds.has(assignment.stock_account_id)) assignmentIds.add(assignment.stock_account_id);
+      }
+    }
+  } catch {
+    // The app can run before the optional multi-assignment table is exposed by Supabase.
+  }
+
+  const assignedCount = rows.filter(
+    (account) => account.status === "assigned" || Boolean(account.assigned_employee_id) || assignmentIds.has(account.id)
+  ).length;
+  const availableCount = rows.filter(
+    (account) => account.status === "available" && !account.assigned_employee_id && !assignmentIds.has(account.id)
+  ).length;
 
   return {
     availableCount,
