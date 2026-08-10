@@ -54,12 +54,20 @@ export function AssignmentSelect({
 
     startTransition(async () => {
       try {
-        if (mode === "add") {
-          await addStockAccountAssignment(formData);
-          setSelectedEmployeeId("");
-        } else {
-          await removeStockAccountAssignment(formData);
+        const result =
+          mode === "add"
+            ? await addStockAccountAssignment(formData)
+            : await removeStockAccountAssignment(formData);
+
+        if (!result.ok) {
+          setNotice(result.message ?? "Assignment could not be updated.");
+          return;
         }
+
+        if (mode === "add") {
+          setSelectedEmployeeId("");
+        }
+        if (result.message) setNotice(result.message);
         router.refresh();
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "Assignment could not be updated.");
