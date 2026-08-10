@@ -24,7 +24,8 @@ import {
   getProfiles,
   getSettings,
   getSoldAccounts,
-  getStockAccounts
+  getStockAccounts,
+  isAccountAssignedTo
 } from "@/lib/data";
 import { getAdvanceBalance, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
 import { stockDisplayTitle } from "@/lib/stock-title";
@@ -64,7 +65,7 @@ export default async function EmployeeDetailPage({
   const canViewFinancials = currentProfile.role !== "employee";
 
   const assignedAccounts = stockAccounts.filter(
-    (account) => account.assigned_employee_id === employee.id && account.status !== "sold"
+    (account) => isAccountAssignedTo(account, employee.id) && account.status !== "sold"
   );
   const sales = soldAccounts.filter((sale) => sale.employee_id === employee.id);
   const paidSales = sales.filter(isPaidSale);

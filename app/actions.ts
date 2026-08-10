@@ -209,6 +209,15 @@ function normalizedStockIdentity(value: string | null | undefined) {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function revalidateStockAssignmentPaths(stockAccountId: string) {
+  revalidatePath("/stock-accounts");
+  revalidatePath("/sales");
+  revalidatePath(`/stock-accounts/${stockAccountId}`);
+  revalidatePath("/employees");
+  revalidatePath("/monthly-performance");
+  revalidatePath("/");
+}
+
 function isDuplicateStockAccount(
   account: Pick<StockAccount, "id" | "status" | "secret_code" | "account_title">,
   currentId: string | null,
@@ -231,10 +240,14 @@ export async function saveStockAccount(formData: FormData) {
   const finalAccountTitle = accountTitle || "Untitled account";
   const gameName = cleanStockText(text(formData, "game_name")) || "Unknown";
   const submittedNotes = cleanStockText(text(formData, "notes")) || null;
-  const assignedEmployeeId = text(formData, "assigned_employee_id");
+  const submittedAssignedEmployeeId = text(formData, "assigned_employee_id");
 
   if (!hasEnv) {
     const currentProfile = await getCurrentProfile();
+    const assignedEmployeeId =
+      currentProfile.role === "employee" && submittedAssignedEmployeeId && submittedAssignedEmployeeId !== currentProfile.id
+        ? currentProfile.id
+        : submittedAssignedEmployeeId;
     const imageUrls = await getDemoImageUrls(formData);
     const demoProfiles = await getDemoProfiles();
     const demoStockAccounts = await getDemoStockAccounts();
@@ -282,6 +295,10 @@ export async function saveStockAccount(formData: FormData) {
 
   const supabase = await createClient();
   const profile = await getCurrentProfile();
+  const assignedEmployeeId =
+    profile.role === "employee" && submittedAssignedEmployeeId && submittedAssignedEmployeeId !== profile.id
+      ? profile.id
+      : submittedAssignedEmployeeId;
   const imageUrls = await uploadStockImages(formData);
   const existing = id
     ? (await supabase.from("stock_accounts").select("buying_price,assigned_employee_id,notes").eq("id", id).single()).data
@@ -397,6 +414,94 @@ export async function assignStockAccount(formData: FormData) {
   revalidatePath("/sales");
   revalidatePath(`/stock-accounts/${stockAccountId}`);
   revalidatePath("/");
+}
+
+export async function addStockAccountAssignment(formData: FormData) {
+  const stockAccountId = String(formData.get("stock_account_id") ?? "");
+  const profile = await getCurrentProfile();
+  const requestedEmployeeId = text(formData, "employee_id") ?? profile.id;
+  const employeeId = profile.role === "employee" ? profile.id : requestedEmployeeId;
+
+  if (!stockAccountId) throw new Error("Stock account is required.");
+
+  if (!hasSupabaseEnv()) {
+    const account = (await getDemoStockAccounts()).find((item) => item.id === stockAccountId);
+    const demoProfiles = await getDemoProfiles();
+    const employee = demoProfiles.find((item) => item.id === employeeId);
+    if (!account || account.status === "sold") return;
+    if (!employee || employee.role === "admin" || employee.status !== "active") {
+      throw new Error("Employee is not available for assignment.");
+    }
+
+    await upsertDemoStockAccount({
+      ...account,
+      assigned_employee_id: account.assigned_employee_id ?? employeeId,
+      assigned_employee: account.assigned_employee ?? employee,
+      status: "assigned",
+      updated_at: new Date().toISOString()
+    });
+
+    revalidateStockAssignmentPaths(stockAccountId);
+    return;
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("add_stock_account_assignment", {
+    p_stock_account_id: stockAccountId,
+    p_employee_id: employeeId
+  });
+
+  if (error) {
+    throw new Error(
+      error.message.includes("function") && error.message.includes("add_stock_account_assignment")
+        ? "Multiple assignment migration is not applied yet. Please run the new Supabase migration first."
+        : error.message
+    );
+  }
+
+  revalidateStockAssignmentPaths(stockAccountId);
+}
+
+export async function removeStockAccountAssignment(formData: FormData) {
+  const stockAccountId = String(formData.get("stock_account_id") ?? "");
+  const profile = await getCurrentProfile();
+  const requestedEmployeeId = text(formData, "employee_id") ?? profile.id;
+  const employeeId = profile.role === "employee" ? profile.id : requestedEmployeeId;
+
+  if (!stockAccountId) throw new Error("Stock account is required.");
+
+  if (!hasSupabaseEnv()) {
+    const account = (await getDemoStockAccounts()).find((item) => item.id === stockAccountId);
+    if (!account || account.status === "sold") return;
+    if (account.assigned_employee_id === employeeId) {
+      await upsertDemoStockAccount({
+        ...account,
+        assigned_employee_id: null,
+        assigned_employee: null,
+        status: "available",
+        updated_at: new Date().toISOString()
+      });
+    }
+
+    revalidateStockAssignmentPaths(stockAccountId);
+    return;
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("remove_stock_account_assignment", {
+    p_stock_account_id: stockAccountId,
+    p_employee_id: employeeId
+  });
+
+  if (error) {
+    throw new Error(
+      error.message.includes("function") && error.message.includes("remove_stock_account_assignment")
+        ? "Multiple assignment migration is not applied yet. Please run the new Supabase migration first."
+        : error.message
+    );
+  }
+
+  revalidateStockAssignmentPaths(stockAccountId);
 }
 
 export async function saveDailyTask(formData: FormData) {

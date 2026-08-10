@@ -4,7 +4,7 @@ import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
-import { getAdvanceTransactions, getCurrentProfile, getProfiles, getSettings, getSoldAccounts, getStockAccounts } from "@/lib/data";
+import { getAdvanceTransactions, getCurrentProfile, getProfiles, getSettings, getSoldAccounts, getStockAccounts, isAccountAssignedTo } from "@/lib/data";
 import { getAdvanceBalance, getProfit, isPaidSale } from "@/lib/metrics";
 import { money } from "@/lib/utils";
 import Link from "next/link";
@@ -28,7 +28,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: P
       : profiles;
 
   const rows = visibleProfiles.map((profile) => {
-    const assigned = stockAccounts.filter((account) => account.assigned_employee_id === profile.id);
+    const assigned = stockAccounts.filter((account) => isAccountAssignedTo(account, profile.id));
     const sales = soldAccounts.filter((sale) => sale.employee_id === profile.id && isPaidSale(sale));
     const transactions = advanceTransactions.filter((transaction) => transaction.employee_id === profile.id);
     return {

@@ -42,6 +42,16 @@ export type StockAccount = {
   created_at: string;
   updated_at: string;
   assigned_employee?: Pick<Profile, "id" | "name" | "email"> | null;
+  assignments?: StockAccountAssignment[];
+};
+
+export type StockAccountAssignment = {
+  id: string;
+  stock_account_id: string;
+  employee_id: string;
+  assigned_by?: string | null;
+  created_at: string;
+  employee?: Pick<Profile, "id" | "name" | "email"> | null;
 };
 
 export type StockAccountCredential = {

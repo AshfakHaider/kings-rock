@@ -1,79 +1,147 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { assignStockAccount } from "@/app/actions";
-import { ConfirmPopover } from "@/components/ui/confirm-popover";
+import { Plus, X } from "lucide-react";
+import { addStockAccountAssignment, removeStockAccountAssignment } from "@/app/actions";
+import { Button } from "@/components/ui/button";
+import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
 import type { Profile, StockAccount } from "@/lib/types";
 
+function assignedProfiles(account: StockAccount) {
+  const assigned: Array<Pick<Profile, "id" | "name" | "email">> = [];
+  const seen = new Set<string>();
+
+  if (account.assigned_employee_id && account.assigned_employee) {
+    assigned.push(account.assigned_employee);
+    seen.add(account.assigned_employee_id);
+  }
+
+  for (const assignment of account.assignments ?? []) {
+    if (!assignment.employee || seen.has(assignment.employee_id)) continue;
+    assigned.push(assignment.employee);
+    seen.add(assignment.employee_id);
+  }
+
+  return assigned;
+}
+
 export function AssignmentSelect({
   account,
-  employees
+  employees,
+  currentProfile
 }: {
   account: StockAccount;
   employees: Profile[];
+  currentProfile: Profile;
 }) {
   const [pending, startTransition] = useTransition();
-  const [pendingEmployeeId, setPendingEmployeeId] = useState<string | null>(null);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
-  const assignableEmployees = employees;
+  const canManageAll = currentProfile.role === "admin" || currentProfile.role === "manager";
+  const assigned = useMemo(() => assignedProfiles(account), [account]);
+  const assignedIds = new Set(assigned.map((employee) => employee.id));
+  const isCurrentAssigned = assignedIds.has(currentProfile.id);
+  const availableEmployees = employees.filter((employee) => !assignedIds.has(employee.id));
+  const disabled = pending || account.status === "sold";
 
-  function submitAssignment(nextEmployeeId: string) {
+  function runAssignment(employeeId: string, mode: "add" | "remove") {
     const formData = new FormData();
     formData.set("stock_account_id", account.id);
-    formData.set("assigned_employee_id", nextEmployeeId);
+    formData.set("employee_id", employeeId);
 
     startTransition(async () => {
-      await assignStockAccount(formData);
-      setPendingEmployeeId(null);
-      router.refresh();
+      try {
+        if (mode === "add") {
+          await addStockAccountAssignment(formData);
+          setSelectedEmployeeId("");
+        } else {
+          await removeStockAccountAssignment(formData);
+        }
+        router.refresh();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Assignment could not be updated.");
+      }
     });
   }
 
-  function changeAssignment(nextEmployeeId: string) {
-    const currentEmployeeId = account.assigned_employee_id ?? "";
-    if (nextEmployeeId === currentEmployeeId) return;
-
-    const currentName = account.assigned_employee?.name;
-
-    if (currentName && currentEmployeeId !== nextEmployeeId) {
-      setPendingEmployeeId(nextEmployeeId);
-      return;
-    }
-
-    submitAssignment(nextEmployeeId);
-  }
-
-  const pendingEmployeeName =
-    assignableEmployees.find((employee) => employee.id === pendingEmployeeId)?.name ?? "Available";
-
   return (
-    <>
-      <Select
-        aria-label="Assign account"
-        value={account.assigned_employee_id ?? ""}
-        onChange={(event) => changeAssignment(event.target.value)}
-        disabled={pending || account.status === "sold"}
-        className="min-w-40"
-      >
-        <option value="">Available</option>
-        {assignableEmployees.map((employee) => (
-          <option key={employee.id} value={employee.id}>
-            {employee.name}
-          </option>
-        ))}
-      </Select>
-      <ConfirmPopover
-        open={pendingEmployeeId !== null}
-        title="Change assignment?"
-        description={`${account.assigned_employee?.name} is working on this account. Are you sure you want to change it to ${pendingEmployeeName}?`}
-        confirmLabel="Change"
-        onCancel={() => setPendingEmployeeId(null)}
-        onConfirm={() => {
-          if (pendingEmployeeId !== null) submitAssignment(pendingEmployeeId);
-        }}
-      />
-    </>
+    <div className="min-w-52 space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {assigned.length ? (
+          assigned.map((employee) => {
+            const canRemove = canManageAll || employee.id === currentProfile.id;
+            return (
+              <span
+                key={employee.id}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-xs font-medium text-cyan-200"
+                title={employee.email}
+              >
+                <span className="truncate">{employee.name}</span>
+                {canRemove ? (
+                  <button
+                    type="button"
+                    onClick={() => runAssignment(employee.id, "remove")}
+                    disabled={disabled}
+                    className="rounded-full p-0.5 text-cyan-100 hover:bg-cyan-400/20 disabled:opacity-50"
+                    aria-label={`Remove ${employee.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                ) : null}
+              </span>
+            );
+          })
+        ) : (
+          <span className="rounded-full border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
+            Available
+          </span>
+        )}
+      </div>
+
+      {canManageAll ? (
+        <div className="flex min-w-0 gap-2">
+          <Select
+            aria-label="Add assigned employee"
+            value={selectedEmployeeId}
+            onChange={(event) => setSelectedEmployeeId(event.currentTarget.value)}
+            disabled={disabled || availableEmployees.length === 0}
+            className="h-9 min-w-0 text-xs"
+          >
+            <option value="">{availableEmployees.length ? "Add employee" : "All assigned"}</option>
+            {availableEmployees.map((employee) => (
+              <option key={employee.id} value={employee.id}>
+                {employee.name}
+              </option>
+            ))}
+          </Select>
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            disabled={disabled || !selectedEmployeeId}
+            onClick={() => runAssignment(selectedEmployeeId, "add")}
+            aria-label="Add employee assignment"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant={isCurrentAssigned ? "outline" : "secondary"}
+          disabled={disabled}
+          onClick={() => runAssignment(currentProfile.id, isCurrentAssigned ? "remove" : "add")}
+          className="w-full"
+        >
+          {isCurrentAssigned ? "Remove me" : "Assign to me"}
+        </Button>
+      )}
+
+      <NoticeToast message={notice} onClose={() => setNotice(null)} />
+    </div>
   );
 }

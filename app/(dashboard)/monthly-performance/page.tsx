@@ -22,7 +22,8 @@ import {
   getProfiles,
   getSettings,
   getSoldAccounts,
-  getStockAccounts
+  getStockAccounts,
+  isAccountAssignedTo
 } from "@/lib/data";
 import { getAdvanceBalance, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
 import { formatDate, money } from "@/lib/utils";
@@ -95,7 +96,7 @@ export default async function MonthlyPerformancePage({
   const rows = employees
     .map((employee) => {
       const assignedAccounts = stockAccounts.filter(
-        (account) => account.assigned_employee_id === employee.id && account.status !== "sold"
+        (account) => isAccountAssignedTo(account, employee.id) && account.status !== "sold"
       );
       const monthlySales = soldAccounts.filter(
         (sale) =>

@@ -3,7 +3,7 @@ import { MarkSoldModal } from "@/components/sales/mark-sold-modal";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
-import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage } from "@/lib/data";
+import { assignedEmployeeNames, DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -73,7 +73,12 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
             : []),
           { key: "selling", header: "Selling price", cell: (row) => money(row.selling_price, settings.currency) },
           { key: "date", header: "Purchase date", cell: (row) => formatDate(row.purchase_date) },
-          { key: "employee", header: "Assigned", cell: (row) => row.assigned_employee?.name ?? "Unassigned", searchValue: (row) => row.assigned_employee?.name ?? "" },
+          {
+            key: "employee",
+            header: "Assigned",
+            cell: (row) => assignedEmployeeNames(row).join(", ") || "Unassigned",
+            searchValue: (row) => assignedEmployeeNames(row).join(" ")
+          },
           { key: "status", header: "Status", cell: (row) => <StatusBadge value={row.status} />, searchValue: (row) => row.status },
           { key: "actions", header: "Action", cell: (row) => <MarkSoldModal account={withoutImages(row)} employees={employees} /> }
         ]}

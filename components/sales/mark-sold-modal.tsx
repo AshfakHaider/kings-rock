@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CircleDollarSign, X } from "lucide-react";
 import { saveSale } from "@/app/actions";
@@ -24,6 +24,15 @@ export function MarkSoldModal({
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
+  const eligibleEmployees = useMemo(() => {
+    const assignedIds = new Set<string>();
+    if (account.assigned_employee_id) assignedIds.add(account.assigned_employee_id);
+    for (const assignment of account.assignments ?? []) {
+      assignedIds.add(assignment.employee_id);
+    }
+    const assignedEmployees = employees.filter((employee) => assignedIds.has(employee.id));
+    return assignedEmployees.length ? assignedEmployees : employees;
+  }, [account, employees]);
 
   function submit(formData: FormData) {
     startTransition(async () => {
@@ -97,9 +106,9 @@ export function MarkSoldModal({
                   id={`employee_${account.id}`}
                   name="employee_id"
                   required
-                  defaultValue={account.assigned_employee_id ?? employees[0]?.id ?? ""}
+                  defaultValue={eligibleEmployees[0]?.id ?? ""}
                 >
-                  {employees.map((employee) => (
+                  {eligibleEmployees.map((employee) => (
                     <option key={employee.id} value={employee.id}>
                       {employee.name}
                     </option>

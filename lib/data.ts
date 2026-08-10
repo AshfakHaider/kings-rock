@@ -32,6 +32,7 @@ import type {
   Settings,
   SoldAccount,
   StockAccount,
+  StockAccountAssignment,
   StockAccountCredential
 } from "@/lib/types";
 import {
@@ -64,6 +65,7 @@ const DAILY_TASK_COMPLETION_SELECT = "id,task_id,employee_id,screenshot_url,scre
 const ACTIVITY_LOG_SELECT = "id,user_id,action,table_name,record_id,old_data,new_data,created_at,user:profiles(id,name,email)";
 const STOCK_ACCOUNT_LIST_SELECT =
   "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
+const STOCK_ASSIGNMENT_SELECT = "id,stock_account_id,employee_id,assigned_by,created_at";
 
 type PagedResult<T> = {
   rows: T[];
@@ -143,6 +145,9 @@ function stockMatchesSearch(account: StockAccount, term: string) {
   const plainNeedle = term.toLowerCase();
   const normalizedNeedle = normalizedSearchText(term);
   const pieces = searchPieces(term);
+  const assignmentText = getAssignedProfiles(account)
+    .map((employee) => `${employee.name} ${employee.email}`)
+    .join(" ");
   const haystack = [
     account.game_name,
     account.account_title,
@@ -152,7 +157,8 @@ function stockMatchesSearch(account: StockAccount, term: string) {
     account.status,
     account.notes,
     account.assigned_employee?.name,
-    account.assigned_employee?.email
+    account.assigned_employee?.email,
+    assignmentText
   ]
     .filter(Boolean)
     .join(" ")
@@ -162,6 +168,101 @@ function stockMatchesSearch(account: StockAccount, term: string) {
   if (haystack.includes(plainNeedle)) return true;
   if (normalizedNeedle && normalizedHaystack.includes(normalizedNeedle)) return true;
   return pieces.length > 0 && pieces.every((piece) => haystack.includes(piece) || normalizedHaystack.includes(piece));
+}
+
+function getAssignedProfiles(account: Pick<StockAccount, "assigned_employee_id" | "assigned_employee" | "assignments">) {
+  const employees: Array<Pick<Profile, "id" | "name" | "email">> = [];
+  const seen = new Set<string>();
+
+  if (account.assigned_employee_id && account.assigned_employee) {
+    employees.push(account.assigned_employee);
+    seen.add(account.assigned_employee_id);
+  }
+
+  for (const assignment of account.assignments ?? []) {
+    if (!assignment.employee || seen.has(assignment.employee_id)) continue;
+    employees.push(assignment.employee);
+    seen.add(assignment.employee_id);
+  }
+
+  return employees;
+}
+
+export function assignedEmployeeNames(account: Pick<StockAccount, "assigned_employee_id" | "assigned_employee" | "assignments">) {
+  return getAssignedProfiles(account).map((employee) => employee.name);
+}
+
+export function isAccountAssignedTo(account: Pick<StockAccount, "assigned_employee_id" | "assignments">, employeeId: string | null | undefined) {
+  if (!employeeId) return false;
+  return account.assigned_employee_id === employeeId || Boolean(account.assignments?.some((assignment) => assignment.employee_id === employeeId));
+}
+
+function hasAnyAssignment(account: Pick<StockAccount, "assigned_employee_id" | "assignments">) {
+  return Boolean(account.assigned_employee_id || account.assignments?.length);
+}
+
+function withLegacyAssignment(account: StockAccount): StockAccount {
+  if (!account.assigned_employee_id || !account.assigned_employee) return { ...account, assignments: account.assignments ?? [] };
+  const assignments = account.assignments ?? [];
+  if (assignments.some((assignment) => assignment.employee_id === account.assigned_employee_id)) {
+    return { ...account, assignments };
+  }
+
+  return {
+    ...account,
+    assignments: [
+      {
+        id: `legacy-${account.id}-${account.assigned_employee_id}`,
+        stock_account_id: account.id,
+        employee_id: account.assigned_employee_id,
+        assigned_by: account.created_by ?? null,
+        created_at: account.updated_at ?? account.created_at,
+        employee: account.assigned_employee
+      },
+      ...assignments
+    ]
+  };
+}
+
+async function hydrateStockAssignments(accounts: StockAccount[]) {
+  if (!accounts.length) return accounts;
+  const baseAccounts = accounts.map((account) => withLegacyAssignment(account));
+  if (!hasSupabaseEnv()) return baseAccounts;
+
+  const accountIds = baseAccounts.map((account) => account.id);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("stock_account_assignments")
+    .select(STOCK_ASSIGNMENT_SELECT)
+    .in("stock_account_id", accountIds);
+
+  if (error || !data) return baseAccounts;
+
+  const rawAssignments = (data as unknown as StockAccountAssignment[]) ?? [];
+  const employeeIds = Array.from(new Set(rawAssignments.map((assignment) => assignment.employee_id)));
+  const { data: profileData } = employeeIds.length
+    ? await supabase.from("profiles").select("id,name,email").in("id", employeeIds)
+    : { data: [] };
+  const profilesById = new Map(
+    ((profileData as Array<Pick<Profile, "id" | "name" | "email">>) ?? []).map((profile) => [profile.id, profile])
+  );
+
+  const assignmentsByAccount = new Map<string, StockAccountAssignment[]>();
+  for (const assignment of rawAssignments) {
+    const existing = assignmentsByAccount.get(assignment.stock_account_id) ?? [];
+    existing.push({
+      ...assignment,
+      employee: profilesById.get(assignment.employee_id) ?? null
+    });
+    assignmentsByAccount.set(assignment.stock_account_id, existing);
+  }
+
+  return baseAccounts.map((account) =>
+    withLegacyAssignment({
+      ...account,
+      assignments: assignmentsByAccount.get(account.id) ?? account.assignments ?? []
+    })
+  );
 }
 
 function soldMatchesSearch(sale: SoldAccount, term: string) {
@@ -516,7 +617,7 @@ async function getDashboardSummaryFallback(options: DashboardPeriodOptions): Pro
       : advanceTransactions;
   const visibleStockAccounts =
     currentProfile.role === "employee"
-      ? stockAccounts.filter((account) => account.assigned_employee_id === currentProfile.id)
+      ? stockAccounts.filter((account) => isAccountAssignedTo(account, currentProfile.id))
       : stockAccounts;
   const activeStockAccounts = visibleStockAccounts.filter((account) => account.status !== "sold");
   const periodPaidSales = visibleSoldAccounts.filter(
@@ -586,17 +687,21 @@ export async function getDashboardSummary(options: DashboardPeriodOptions): Prom
 
   const month = options.month === "all" ? null : options.month;
   const supabase = await createClient();
-  const [{ data, error }, stockQuantitySummary, currentProfile] = await Promise.all([
+  const currentProfile = await getCurrentProfile();
+  if (currentProfile.role === "employee") {
+    return getDashboardSummaryFallback(options);
+  }
+
+  const [{ data, error }, stockQuantitySummary] = await Promise.all([
     supabase.rpc("dashboard_summary", {
       p_year: options.year,
       p_month: month
     }),
-    getStockQuantityByGameSummary(),
-    getCurrentProfile()
+    getStockQuantityByGameSummary()
   ]);
   const paidGameSales = await getDashboardPaidSales({
     ...options,
-    employeeId: currentProfile.role === "employee" ? currentProfile.id : null
+    employeeId: null
   });
 
   if (!error && data) {
@@ -621,18 +726,18 @@ export async function getProfiles(): Promise<Profile[]> {
 export async function getStockAccounts(): Promise<StockAccount[]> {
   if (!hasSupabaseEnv()) {
     const accounts = await getDemoStockAccounts();
-    return accounts.map((account) => ({
+    return hydrateStockAssignments(accounts.map((account) => ({
       ...account,
       image_url: null,
       image_urls: []
-    }));
+    })));
   }
   const supabase = await createClient();
   const { data } = await supabase
     .from("stock_accounts")
     .select(STOCK_ACCOUNT_LIST_SELECT)
     .order("created_at", { ascending: false });
-  return (data as unknown as StockAccount[]) ?? [];
+  return hydrateStockAssignments((data as unknown as StockAccount[]) ?? []);
 }
 
 export async function getStockAccountsPage(options: StockPageOptions = {}): Promise<PagedResult<StockAccount>> {
@@ -650,8 +755,8 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
   if (!hasSupabaseEnv()) {
     const rows = (await getStockAccounts()).filter((account) => {
       if (excludeSold && account.status === "sold") return false;
-      if (assignedOnly && !account.assigned_employee_id) return false;
-      if (assignedEmployeeId && account.assigned_employee_id !== assignedEmployeeId) return false;
+      if (assignedOnly && !hasAnyAssignment(account)) return false;
+      if (assignedEmployeeId && !isAccountAssignedTo(account, assignedEmployeeId)) return false;
       if (gameName && account.game_name !== gameName) return false;
       if (!term) return true;
       return stockMatchesSearch(account, term);
@@ -670,10 +775,8 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     .select(STOCK_ACCOUNT_LIST_SELECT, { count: "exact" });
 
   if (excludeSold) query = query.neq("status", "sold");
-  if (assignedOnly) query = query.not("assigned_employee_id", "is", null);
-  if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
   if (gameName) query = query.eq("game_name", gameName);
-  if (term) {
+  if (term || assignedOnly || assignedEmployeeId) {
     const rows: StockAccount[] = [];
     const batchSize = 1000;
     let offset = 0;
@@ -681,8 +784,6 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     while (offset < 20000) {
       let searchQuery = supabase.from("stock_accounts").select(STOCK_ACCOUNT_LIST_SELECT);
       if (excludeSold) searchQuery = searchQuery.neq("status", "sold");
-      if (assignedOnly) searchQuery = searchQuery.not("assigned_employee_id", "is", null);
-      if (assignedEmployeeId) searchQuery = searchQuery.eq("assigned_employee_id", assignedEmployeeId);
       if (gameName) searchQuery = searchQuery.eq("game_name", gameName);
 
       const { data } = await searchQuery
@@ -695,13 +796,18 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
       offset += batchSize;
     }
 
-    const matchedRows = rows.filter((account) => stockMatchesSearch(account, term));
+    const hydratedRows = await hydrateStockAssignments(rows);
+    const matchedRows = hydratedRows.filter((account) => {
+      if (assignedOnly && !hasAnyAssignment(account)) return false;
+      if (assignedEmployeeId && !isAccountAssignedTo(account, assignedEmployeeId)) return false;
+      return term ? stockMatchesSearch(account, term) : true;
+    });
     return paginateMemory(matchedRows, page, pageSize);
   }
 
   const { data, count } = await query.order("created_at", { ascending: sort === "oldest" }).range(from, to);
   return {
-    rows: (data as unknown as StockAccount[]) ?? [],
+    rows: await hydrateStockAssignments((data as unknown as StockAccount[]) ?? []),
     total: count ?? 0
   };
 }
@@ -723,27 +829,10 @@ export async function getStockGameNames(options: { excludeSold?: boolean } = {})
 }
 
 export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
-  if (!hasSupabaseEnv()) {
-    const accounts = await getStockAccounts();
-    const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
-    const assignedCount = rows.filter((account) => account.status === "assigned" || Boolean(account.assigned_employee_id)).length;
-    const availableCount = rows.filter((account) => account.status === "available" && !account.assigned_employee_id).length;
-    return {
-      availableCount,
-      assignedCount,
-      activeCount: availableCount + assignedCount,
-      buyingValue: rows.reduce((total, account) => total + Number(account.buying_price), 0),
-      sellingValue: rows.reduce((total, account) => total + Number(account.selling_price ?? 0), 0)
-    };
-  }
-
-  const supabase = await createClient();
-  let query = supabase.from("stock_accounts").select("status,buying_price,selling_price,assigned_employee_id");
-  if (options.excludeSold) query = query.neq("status", "sold");
-  const { data } = await query;
-  const rows = (data as Pick<StockAccount, "status" | "buying_price" | "selling_price" | "assigned_employee_id">[]) ?? [];
-  const assignedCount = rows.filter((account) => account.status === "assigned" || Boolean(account.assigned_employee_id)).length;
-  const availableCount = rows.filter((account) => account.status === "available" && !account.assigned_employee_id).length;
+  const accounts = await getStockAccounts();
+  const rows = options.excludeSold ? accounts.filter((account) => account.status !== "sold") : accounts;
+  const assignedCount = rows.filter((account) => account.status === "assigned" || hasAnyAssignment(account)).length;
+  const availableCount = rows.filter((account) => account.status === "available" && !hasAnyAssignment(account)).length;
 
   return {
     availableCount,
@@ -757,7 +846,8 @@ export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
 export async function getStockAccount(id: string): Promise<StockAccount | null> {
   if (!hasSupabaseEnv()) {
     const accounts = await getDemoStockAccounts();
-    return accounts.find((account) => account.id === id) ?? null;
+    const account = accounts.find((account) => account.id === id) ?? null;
+    return account ? (await hydrateStockAssignments([account]))[0] : null;
   }
 
   const supabase = await createClient();
@@ -767,7 +857,8 @@ export async function getStockAccount(id: string): Promise<StockAccount | null> 
     .eq("id", id)
     .maybeSingle();
 
-  return (data as StockAccount | null) ?? null;
+  const account = (data as StockAccount | null) ?? null;
+  return account ? (await hydrateStockAssignments([account]))[0] : null;
 }
 
 export async function getStockAccountCredential(
@@ -777,10 +868,10 @@ export async function getStockAccountCredential(
   const currentProfile = profile ?? (await getCurrentProfile());
   const isAssigned = Boolean(account.assigned_employee_id);
   const canViewCredential =
-    isAssigned &&
+    (isAssigned || hasAnyAssignment(account)) &&
     (currentProfile.role === "admin" ||
       currentProfile.role === "manager" ||
-      account.assigned_employee_id === currentProfile.id);
+      isAccountAssignedTo(account, currentProfile.id));
 
   if (!canViewCredential) return null;
 

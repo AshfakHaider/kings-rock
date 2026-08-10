@@ -70,7 +70,8 @@ export function StockAccountModal({
   canViewBuyingPrice = true,
   existingImageCount,
   currentProfileId,
-  isAdmin = false
+  isAdmin = false,
+  canAssignAnyEmployee = false
 }: {
   employees: Profile[];
   gameCategories: string[];
@@ -81,6 +82,7 @@ export function StockAccountModal({
   existingImageCount?: number;
   currentProfileId?: string;
   isAdmin?: boolean;
+  canAssignAnyEmployee?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
@@ -106,8 +108,14 @@ export function StockAccountModal({
     savedGameCategories,
     [stock?.game_name, selectedGameName]
   );
+  const assignmentOptions = canAssignAnyEmployee
+    ? employees
+    : employees.filter((employee) => employee.id === currentProfileId);
+  const isCurrentProfileAssigned =
+    stock?.assigned_employee_id === currentProfileId ||
+    Boolean(stock?.assignments?.some((assignment) => assignment.employee_id === currentProfileId));
   const canUsePrivateNotes =
-    isAdmin || assignedEmployeeId === currentProfileId || (isEdit && stock?.assigned_employee_id === currentProfileId);
+    isAdmin || assignedEmployeeId === currentProfileId || (isEdit && isCurrentProfileAssigned);
 
   useEffect(() => {
     setSavedGameCategories(mergeGameCategories(DEFAULT_GAME_CATEGORIES, gameCategories, [stock?.game_name]));
@@ -393,7 +401,7 @@ export function StockAccountModal({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="assigned_employee_id">Assigned employee</Label>
+                <Label htmlFor="assigned_employee_id">Initial assigned employee</Label>
                 <Select
                   id="assigned_employee_id"
                   name="assigned_employee_id"
@@ -401,7 +409,7 @@ export function StockAccountModal({
                   onChange={(event) => setAssignedEmployeeId(event.currentTarget.value)}
                 >
                   <option value="">Unassigned</option>
-                  {employees.map((employee) => (
+                  {assignmentOptions.map((employee) => (
                     <option key={employee.id} value={employee.id}>
                       {employee.name}
                     </option>

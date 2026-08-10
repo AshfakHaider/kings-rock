@@ -3,12 +3,13 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Calendar, KeyRound, UserRound } from "lucide-react";
 import { PageHeader } from "@/components/modules/page-header";
 import { StatusBadge } from "@/components/modules/status-badge";
+import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockImageGallery } from "@/components/stock/stock-image-gallery";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getCurrentProfile, getProfiles, getSettings, getStockAccount } from "@/lib/data";
+import { assignedEmployeeNames, getCurrentProfile, getProfiles, getSettings, getStockAccount, isAccountAssignedTo } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -32,8 +33,9 @@ export default async function StockAccountDetailPage({
   if (!account) notFound();
   const canViewBuyingPrice = currentProfile.role !== "employee";
   const canManageStockRecords = currentProfile.role !== "employee";
-  const canViewPrivateNotes = currentProfile.role === "admin" || account.assigned_employee_id === currentProfile.id;
+  const canViewPrivateNotes = currentProfile.role === "admin" || isAccountAssignedTo(account, currentProfile.id);
   const modalStock = canViewPrivateNotes ? account : { ...account, notes: null };
+  const employees = profiles.filter((profile) => profile.role !== "admin" && profile.status === "active");
 
   const images =
     account.image_urls && account.image_urls.length > 0
@@ -61,11 +63,12 @@ export default async function StockAccountDetailPage({
                 variant="edit"
                 stock={modalStock}
                 existingImageCount={images.length}
-                employees={profiles.filter((profile) => profile.role !== "admin")}
+                employees={employees}
                 gameCategories={settings.game_categories}
                 canViewBuyingPrice={canViewBuyingPrice}
                 currentProfileId={currentProfile.id}
                 isAdmin={currentProfile.role === "admin"}
+                canAssignAnyEmployee={currentProfile.role !== "employee"}
               />
             ) : null}
           </div>
@@ -113,10 +116,15 @@ export default async function StockAccountDetailPage({
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
                 <UserRound className="h-4 w-4" />
-                Assigned employee
+                Assigned employees
               </span>
-              <span>{account.assigned_employee?.name ?? "Unassigned"}</span>
+              <span className="text-right">{assignedEmployeeNames(account).join(", ") || "Unassigned"}</span>
             </div>
+            {account.status !== "sold" ? (
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <AssignmentSelect account={account} employees={employees} currentProfile={currentProfile} />
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </section>

@@ -8,8 +8,9 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
-import { DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockGameNames, getStockTotals } from "@/lib/data";
+import { assignedEmployeeNames, DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockGameNames, getStockTotals, isAccountAssignedTo } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
+import type { StockAccount } from "@/lib/types";
 import { formatDate, money } from "@/lib/utils";
 import Link from "next/link";
 
@@ -29,12 +30,12 @@ function withoutImages<T extends { image_url?: string | null; image_urls?: strin
   };
 }
 
-function withPrivateNotesForCurrentUser<T extends { assigned_employee_id?: string | null; notes?: string | null }>(
+function withPrivateNotesForCurrentUser<T extends Pick<StockAccount, "assigned_employee_id" | "assignments" | "notes">>(
   account: T,
   currentProfileId: string,
   isAdmin: boolean
 ) {
-  if (isAdmin || account.assigned_employee_id === currentProfileId) return account;
+  if (isAdmin || isAccountAssignedTo(account, currentProfileId)) return account;
   return { ...account, notes: null };
 }
 
@@ -91,6 +92,7 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
             canViewBuyingPrice={canViewBuyingPrice}
             currentProfileId={currentProfile.id}
             isAdmin={currentProfile.role === "admin"}
+            canAssignAnyEmployee={currentProfile.role !== "employee"}
           />
         }
       />
@@ -142,7 +144,7 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
                 <CopyStockTitleButton title={stockDisplayTitle(row.secret_code, row.account_title)} />
               </div>
             ),
-            searchValue: (row) => `${row.account_title} ${row.game_name} ${row.secret_code ?? ""} ${row.assigned_employee?.name ?? ""}`
+            searchValue: (row) => `${row.account_title} ${row.game_name} ${row.secret_code ?? ""} ${assignedEmployeeNames(row).join(" ")}`
           },
           ...(canViewBuyingPrice
             ? [{
@@ -168,9 +170,10 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
               <AssignmentSelect
                 account={withoutImages(row)}
                 employees={employees}
+                currentProfile={currentProfile}
               />
             ),
-            searchValue: (row) => row.assigned_employee?.name ?? "Available"
+            searchValue: (row) => assignedEmployeeNames(row).join(" ") || "Available"
           },
           {
             key: "status",
@@ -194,6 +197,7 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
                       canViewBuyingPrice={canViewBuyingPrice}
                       currentProfileId={currentProfile.id}
                       isAdmin={currentProfile.role === "admin"}
+                      canAssignAnyEmployee={currentProfile.role !== "employee"}
                     />
                     <form action={deleteStockAccount}>
                       <input type="hidden" name="id" value={row.id} />
