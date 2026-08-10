@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { createClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv } from "@/lib/supabase/server";
 import { decryptSecret } from "@/lib/crypto";
 import {
   demoActivityLogs,
@@ -230,21 +230,35 @@ async function hydrateStockAssignments(accounts: StockAccount[]) {
   if (!hasSupabaseEnv()) return baseAccounts;
 
   const accountIds = baseAccounts.map((account) => account.id);
-  const supabase = await createClient();
+  const assignmentClients = hasSupabaseAdminEnv()
+    ? [createAdminClient(), await createClient()]
+    : [await createClient()];
   const rawAssignments: StockAccountAssignment[] = [];
+  let assignmentClient = assignmentClients[0];
+  let loadedAssignments = false;
 
-  try {
-    for (let index = 0; index < accountIds.length; index += 100) {
-      const batchIds = accountIds.slice(index, index + 100);
-      const { data, error } = await supabase
-        .from("stock_account_assignments")
-        .select(STOCK_ASSIGNMENT_SELECT)
-        .in("stock_account_id", batchIds);
+  for (const client of assignmentClients) {
+    rawAssignments.length = 0;
+    try {
+      for (let index = 0; index < accountIds.length; index += 100) {
+        const batchIds = accountIds.slice(index, index + 100);
+        const { data, error } = await client
+          .from("stock_account_assignments")
+          .select(STOCK_ASSIGNMENT_SELECT)
+          .in("stock_account_id", batchIds);
 
-      if (error) return baseAccounts;
-      rawAssignments.push(...(((data as unknown as StockAccountAssignment[]) ?? [])));
+        if (error) throw error;
+        rawAssignments.push(...(((data as unknown as StockAccountAssignment[]) ?? [])));
+      }
+      assignmentClient = client;
+      loadedAssignments = true;
+      break;
+    } catch {
+      // Try the next available server client before falling back to legacy assignment data.
     }
-  } catch {
+  }
+
+  if (!loadedAssignments) {
     return baseAccounts;
   }
 
@@ -252,7 +266,7 @@ async function hydrateStockAssignments(accounts: StockAccount[]) {
   let profileData: Array<Pick<Profile, "id" | "name" | "email">> = [];
   try {
     if (employeeIds.length) {
-      const { data } = await supabase.from("profiles").select("id,name,email").in("id", employeeIds);
+      const { data } = await assignmentClient.from("profiles").select("id,name,email").in("id", employeeIds);
       profileData = (data as Array<Pick<Profile, "id" | "name" | "email">>) ?? [];
     }
   } catch {
@@ -867,18 +881,24 @@ export async function getStockTotals(options: { excludeSold?: boolean } = {}) {
   const rowIds = new Set(rows.map((account) => account.id));
   const assignmentIds = new Set<string>();
 
-  try {
-    const { data: assignmentData, error } = await supabase
-      .from("stock_account_assignments")
-      .select("stock_account_id");
+  const assignmentClients = hasSupabaseAdminEnv()
+    ? [createAdminClient(), supabase]
+    : [supabase];
 
-    if (!error) {
+  for (const client of assignmentClients) {
+    try {
+      const { data: assignmentData, error } = await client
+        .from("stock_account_assignments")
+        .select("stock_account_id");
+
+      if (error) throw error;
       for (const assignment of (assignmentData as Array<{ stock_account_id: string }> | null) ?? []) {
         if (rowIds.has(assignment.stock_account_id)) assignmentIds.add(assignment.stock_account_id);
       }
+      break;
+    } catch {
+      // The app can run before the optional multi-assignment table is exposed by Supabase.
     }
-  } catch {
-    // The app can run before the optional multi-assignment table is exposed by Supabase.
   }
 
   const assignedCount = rows.filter(

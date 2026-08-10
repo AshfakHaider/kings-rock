@@ -291,7 +291,7 @@ async function addStockAccountAssignmentWithAdmin(
 
   const { data: account, error: accountError } = await adminSupabase
     .from("stock_accounts")
-    .select("id,status")
+    .select("id,status,assigned_employee_id")
     .eq("id", stockAccountId)
     .single();
 
@@ -315,7 +315,19 @@ async function addStockAccountAssignmentWithAdmin(
 
   if (assignmentError) throw new Error(stockAssignmentSchemaMessage(assignmentError.message));
 
-  if (account.status === "available") {
+  if (!account.assigned_employee_id) {
+    const { error: legacyStatusError } = await adminSupabase
+      .from("stock_accounts")
+      .update({
+        assigned_employee_id: employeeId,
+        status: "assigned"
+      })
+      .eq("id", stockAccountId)
+      .is("assigned_employee_id", null)
+      .neq("status", "sold");
+
+    if (legacyStatusError) throw new Error(legacyStatusError.message);
+  } else if (account.status === "available") {
     const { error: statusError } = await adminSupabase
       .from("stock_accounts")
       .update({ status: "assigned" })
