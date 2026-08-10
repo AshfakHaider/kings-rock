@@ -28,6 +28,7 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
     pageSize: DEFAULT_PAGE_SIZE,
     q: params.q,
     excludeSold: true,
+    assignedOnly: true,
     assignedEmployeeId: currentProfile.role === "employee" ? currentProfile.id : null
   });
   const canViewBuyingPrice = currentProfile.role !== "employee";
@@ -42,7 +43,7 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
     <>
       <PageHeader
         title="Sales"
-        description="Every account except sold accounts is shown here. Open an account or mark it as sold."
+        description="Assigned accounts ready for selling are shown here. Open an account or mark it as sold."
       />
 
       <ResponsiveTable
@@ -54,7 +55,7 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
         serverSide
         searchPlaceholder="Search accounts by code, title, game..."
         emptyTitle="No accounts ready for sale"
-        emptyDescription="Add stock accounts first, then every non-sold account will appear here."
+        emptyDescription="Assign stock accounts to an employee first, then they will appear here."
         columns={[
           {
             key: "account",

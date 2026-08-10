@@ -78,6 +78,7 @@ type PageOptions = {
 
 type StockPageOptions = PageOptions & {
   excludeSold?: boolean;
+  assignedOnly?: boolean;
   assignedEmployeeId?: string | null;
   gameName?: string | null;
   sort?: "recent" | "oldest";
@@ -635,12 +636,21 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
 }
 
 export async function getStockAccountsPage(options: StockPageOptions = {}): Promise<PagedResult<StockAccount>> {
-  const { page = 1, pageSize = DEFAULT_PAGE_SIZE, excludeSold = false, assignedEmployeeId = null, gameName = null, sort = "recent" } = options;
+  const {
+    page = 1,
+    pageSize = DEFAULT_PAGE_SIZE,
+    excludeSold = false,
+    assignedOnly = false,
+    assignedEmployeeId = null,
+    gameName = null,
+    sort = "recent"
+  } = options;
   const term = searchTerm(options.q);
 
   if (!hasSupabaseEnv()) {
     const rows = (await getStockAccounts()).filter((account) => {
       if (excludeSold && account.status === "sold") return false;
+      if (assignedOnly && !account.assigned_employee_id) return false;
       if (assignedEmployeeId && account.assigned_employee_id !== assignedEmployeeId) return false;
       if (gameName && account.game_name !== gameName) return false;
       if (!term) return true;
@@ -660,6 +670,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     .select(STOCK_ACCOUNT_LIST_SELECT, { count: "exact" });
 
   if (excludeSold) query = query.neq("status", "sold");
+  if (assignedOnly) query = query.not("assigned_employee_id", "is", null);
   if (assignedEmployeeId) query = query.eq("assigned_employee_id", assignedEmployeeId);
   if (gameName) query = query.eq("game_name", gameName);
   if (term) {
@@ -670,6 +681,7 @@ export async function getStockAccountsPage(options: StockPageOptions = {}): Prom
     while (offset < 20000) {
       let searchQuery = supabase.from("stock_accounts").select(STOCK_ACCOUNT_LIST_SELECT);
       if (excludeSold) searchQuery = searchQuery.neq("status", "sold");
+      if (assignedOnly) searchQuery = searchQuery.not("assigned_employee_id", "is", null);
       if (assignedEmployeeId) searchQuery = searchQuery.eq("assigned_employee_id", assignedEmployeeId);
       if (gameName) searchQuery = searchQuery.eq("game_name", gameName);
 
