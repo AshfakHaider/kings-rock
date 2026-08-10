@@ -231,20 +231,35 @@ async function hydrateStockAssignments(accounts: StockAccount[]) {
 
   const accountIds = baseAccounts.map((account) => account.id);
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("stock_account_assignments")
-    .select(STOCK_ASSIGNMENT_SELECT)
-    .in("stock_account_id", accountIds);
+  const rawAssignments: StockAccountAssignment[] = [];
 
-  if (error || !data) return baseAccounts;
+  try {
+    for (let index = 0; index < accountIds.length; index += 100) {
+      const batchIds = accountIds.slice(index, index + 100);
+      const { data, error } = await supabase
+        .from("stock_account_assignments")
+        .select(STOCK_ASSIGNMENT_SELECT)
+        .in("stock_account_id", batchIds);
 
-  const rawAssignments = (data as unknown as StockAccountAssignment[]) ?? [];
+      if (error) return baseAccounts;
+      rawAssignments.push(...(((data as unknown as StockAccountAssignment[]) ?? [])));
+    }
+  } catch {
+    return baseAccounts;
+  }
+
   const employeeIds = Array.from(new Set(rawAssignments.map((assignment) => assignment.employee_id)));
-  const { data: profileData } = employeeIds.length
-    ? await supabase.from("profiles").select("id,name,email").in("id", employeeIds)
-    : { data: [] };
+  let profileData: Array<Pick<Profile, "id" | "name" | "email">> = [];
+  try {
+    if (employeeIds.length) {
+      const { data } = await supabase.from("profiles").select("id,name,email").in("id", employeeIds);
+      profileData = (data as Array<Pick<Profile, "id" | "name" | "email">>) ?? [];
+    }
+  } catch {
+    profileData = [];
+  }
   const profilesById = new Map(
-    ((profileData as Array<Pick<Profile, "id" | "name" | "email">>) ?? []).map((profile) => [profile.id, profile])
+    profileData.map((profile) => [profile.id, profile])
   );
 
   const assignmentsByAccount = new Map<string, StockAccountAssignment[]>();
