@@ -38,6 +38,7 @@ export function AssignmentSelect({
 }) {
   const [pending, startTransition] = useTransition();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
   const canManageAll = currentProfile.role === "admin" || currentProfile.role === "manager";
@@ -45,9 +46,12 @@ export function AssignmentSelect({
   const assignedIds = new Set(assigned.map((employee) => employee.id));
   const isCurrentAssigned = assignedIds.has(currentProfile.id);
   const availableEmployees = employees.filter((employee) => !assignedIds.has(employee.id));
+  const shouldShowEmployeeSelect = !assigned.length || showAddEmployee;
   const disabled = pending || account.status === "sold";
 
   function runAssignment(employeeId: string, mode: "add" | "remove") {
+    if (!employeeId || disabled) return;
+
     const formData = new FormData();
     formData.set("stock_account_id", account.id);
     formData.set("employee_id", employeeId);
@@ -66,6 +70,7 @@ export function AssignmentSelect({
 
         if (mode === "add") {
           setSelectedEmployeeId("");
+          setShowAddEmployee(false);
         }
         if (result.message) setNotice(result.message);
         router.refresh();
@@ -111,30 +116,38 @@ export function AssignmentSelect({
 
       {canManageAll ? (
         <div className="flex min-w-0 gap-2">
-          <Select
-            aria-label="Add assigned employee"
-            value={selectedEmployeeId}
-            onChange={(event) => setSelectedEmployeeId(event.currentTarget.value)}
-            disabled={disabled || availableEmployees.length === 0}
-            className="h-9 min-w-0 text-xs"
-          >
-            <option value="">{availableEmployees.length ? "Add employee" : "All assigned"}</option>
-            {availableEmployees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </Select>
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            disabled={disabled || !selectedEmployeeId}
-            onClick={() => runAssignment(selectedEmployeeId, "add")}
-            aria-label="Add employee assignment"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+          {shouldShowEmployeeSelect ? (
+            <Select
+              aria-label="Add assigned employee"
+              value={selectedEmployeeId}
+              onChange={(event) => {
+                const employeeId = event.currentTarget.value;
+                setSelectedEmployeeId(employeeId);
+                if (employeeId) runAssignment(employeeId, "add");
+              }}
+              disabled={disabled || availableEmployees.length === 0}
+              className="h-9 min-w-0 text-xs"
+            >
+              <option value="">{availableEmployees.length ? "Add employee" : "All assigned"}</option>
+              {availableEmployees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          {assigned.length ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              disabled={disabled || availableEmployees.length === 0}
+              onClick={() => setShowAddEmployee((value) => !value)}
+              aria-label={showAddEmployee ? "Hide employee assignment" : "Add another employee"}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
       ) : (
         <Button
