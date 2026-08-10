@@ -55,14 +55,25 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
   const page = Number(params.page ?? 1);
   const sort = params.sort === "oldest" ? "oldest" : "recent";
   const gameFilter = params.game?.trim() || null;
-  const [settings, stockPage, stockTotals, profiles, currentProfile, stockGameNames] = await Promise.all([
-    getSettings(),
+  const [settings, currentProfile] = await Promise.all([getSettings(), getCurrentProfile()]);
+  const [stockPageResult, stockTotalsResult, profilesResult, stockGameNamesResult] = await Promise.allSettled([
     getStockAccountsPage({ page, pageSize: DEFAULT_PAGE_SIZE, q: params.q, excludeSold: true, sort, gameName: gameFilter }),
     getStockTotals({ excludeSold: true }),
     getProfiles(),
-    getCurrentProfile(),
     getStockGameNames({ excludeSold: true })
   ]);
+  const stockPage =
+    stockPageResult.status === "fulfilled"
+      ? stockPageResult.value
+      : { rows: [], total: 0 };
+  const stockTotals =
+    stockTotalsResult.status === "fulfilled"
+      ? stockTotalsResult.value
+      : { availableCount: 0, assignedCount: 0, activeCount: 0, buyingValue: 0, sellingValue: 0 };
+  const profiles = profilesResult.status === "fulfilled" ? profilesResult.value : [];
+  const stockGameNames = stockGameNamesResult.status === "fulfilled" ? stockGameNamesResult.value : [];
+  const stockLoadError =
+    stockPageResult.status === "rejected" || stockTotalsResult.status === "rejected" || profilesResult.status === "rejected" || stockGameNamesResult.status === "rejected";
   const gameOptions = uniqueGameOptions(settings.game_categories, stockGameNames);
   const visibleStockAccounts = stockPage.rows;
   const employees = profiles.filter((profile) => profile.role !== "admin" && profile.status === "active");
@@ -96,6 +107,11 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
           />
         }
       />
+      {stockLoadError ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+          Stock data could not fully refresh. Please reload once; if it repeats, check the latest Vercel function log for the exact Supabase error.
+        </div>
+      ) : null}
       <ResponsiveTable
         rows={visibleStockAccounts}
         searchQuery={params.q}

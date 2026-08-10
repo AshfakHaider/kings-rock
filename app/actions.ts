@@ -218,6 +218,196 @@ function revalidateStockAssignmentPaths(stockAccountId: string) {
   revalidatePath("/");
 }
 
+function stockAssignmentSchemaMessage(message: string) {
+  const lowerMessage = message.toLowerCase();
+  if (
+    lowerMessage.includes("stock_account_assignments") ||
+    (lowerMessage.includes("function") && lowerMessage.includes("stock_account_assignment")) ||
+    lowerMessage.includes("schema cache")
+  ) {
+    return "Multiple assignment migration is not applied correctly on the live database. Please run supabase/migrations/20260810102909_multiple_stock_assignments.sql again.";
+  }
+
+  return message;
+}
+
+async function insertActivityLogWithAdmin(
+  userId: string,
+  action: string,
+  tableName: string,
+  recordId: string | null,
+  oldData: unknown,
+  newData: unknown
+) {
+  if (!hasSupabaseAdminEnv()) return;
+
+  try {
+    const adminSupabase = createAdminClient();
+    await adminSupabase.from("activity_logs").insert({
+      user_id: userId,
+      action,
+      table_name: tableName,
+      record_id: recordId,
+      old_data: oldData,
+      new_data: newData
+    });
+  } catch {
+    // Activity logging should never break the business action.
+  }
+}
+
+async function addStockAccountAssignmentWithAdmin(
+  profile: Profile,
+  stockAccountId: string,
+  employeeId: string
+) {
+  if (!hasSupabaseAdminEnv()) return false;
+
+  const adminSupabase = createAdminClient();
+
+  if (profile.role === "employee" && employeeId !== profile.id) {
+    throw new Error("Employees can only assign accounts to themselves.");
+  }
+
+  const { data: employee, error: employeeError } = await adminSupabase
+    .from("profiles")
+    .select("id,role,status")
+    .eq("id", employeeId)
+    .single();
+
+  if (employeeError) throw new Error(employeeError.message);
+  if (!employee || employee.role === "admin" || employee.status !== "active") {
+    throw new Error("Employee is not available for assignment.");
+  }
+
+  const { data: account, error: accountError } = await adminSupabase
+    .from("stock_accounts")
+    .select("id,status")
+    .eq("id", stockAccountId)
+    .single();
+
+  if (accountError) throw new Error(accountError.message);
+  if (!account || account.status === "sold") {
+    throw new Error("Stock account not found or already sold.");
+  }
+
+  const { data: savedAssignment, error: assignmentError } = await adminSupabase
+    .from("stock_account_assignments")
+    .upsert(
+      {
+        stock_account_id: stockAccountId,
+        employee_id: employeeId,
+        assigned_by: profile.id
+      },
+      { onConflict: "stock_account_id,employee_id" }
+    )
+    .select("id,stock_account_id,employee_id,assigned_by,created_at")
+    .single();
+
+  if (assignmentError) throw new Error(stockAssignmentSchemaMessage(assignmentError.message));
+
+  if (account.status === "available") {
+    const { error: statusError } = await adminSupabase
+      .from("stock_accounts")
+      .update({ status: "assigned" })
+      .eq("id", stockAccountId)
+      .eq("status", "available");
+
+    if (statusError) throw new Error(statusError.message);
+  }
+
+  await insertActivityLogWithAdmin(
+    profile.id,
+    "stock_assignment_added",
+    "stock_account_assignments",
+    savedAssignment?.id ?? null,
+    null,
+    savedAssignment
+  );
+
+  return true;
+}
+
+async function removeStockAccountAssignmentWithAdmin(
+  profile: Profile,
+  stockAccountId: string,
+  employeeId: string
+) {
+  if (!hasSupabaseAdminEnv()) return false;
+
+  const adminSupabase = createAdminClient();
+
+  if (profile.role === "employee" && employeeId !== profile.id) {
+    throw new Error("Employees can only remove themselves.");
+  }
+
+  const { data: employee, error: employeeError } = await adminSupabase
+    .from("profiles")
+    .select("id,role")
+    .eq("id", employeeId)
+    .single();
+
+  if (employeeError) throw new Error(employeeError.message);
+  if (!employee || employee.role === "admin") {
+    throw new Error("Employee not found.");
+  }
+
+  const { data: oldAssignment, error: deleteError } = await adminSupabase
+    .from("stock_account_assignments")
+    .delete()
+    .eq("stock_account_id", stockAccountId)
+    .eq("employee_id", employeeId)
+    .select("id,stock_account_id,employee_id,assigned_by,created_at")
+    .maybeSingle();
+
+  if (deleteError) throw new Error(stockAssignmentSchemaMessage(deleteError.message));
+
+  const { error: legacyUpdateError } = await adminSupabase
+    .from("stock_accounts")
+    .update({ assigned_employee_id: null })
+    .eq("id", stockAccountId)
+    .eq("assigned_employee_id", employeeId)
+    .neq("status", "sold");
+
+  if (legacyUpdateError) throw new Error(legacyUpdateError.message);
+
+  const { data: account, error: accountError } = await adminSupabase
+    .from("stock_accounts")
+    .select("id,status,assigned_employee_id")
+    .eq("id", stockAccountId)
+    .single();
+
+  if (accountError) throw new Error(accountError.message);
+
+  const { count, error: countError } = await adminSupabase
+    .from("stock_account_assignments")
+    .select("id", { count: "exact", head: true })
+    .eq("stock_account_id", stockAccountId);
+
+  if (countError) throw new Error(stockAssignmentSchemaMessage(countError.message));
+
+  if (account?.status === "assigned" && !account.assigned_employee_id && (count ?? 0) === 0) {
+    const { error: statusError } = await adminSupabase
+      .from("stock_accounts")
+      .update({ status: "available" })
+      .eq("id", stockAccountId)
+      .eq("status", "assigned");
+
+    if (statusError) throw new Error(statusError.message);
+  }
+
+  await insertActivityLogWithAdmin(
+    profile.id,
+    "stock_assignment_removed",
+    "stock_account_assignments",
+    oldAssignment?.id ?? stockAccountId,
+    oldAssignment,
+    null
+  );
+
+  return true;
+}
+
 function isDuplicateStockAccount(
   account: Pick<StockAccount, "id" | "status" | "secret_code" | "account_title">,
   currentId: string | null,
@@ -445,6 +635,12 @@ export async function addStockAccountAssignment(formData: FormData) {
     return;
   }
 
+  const handledByAdminClient = await addStockAccountAssignmentWithAdmin(profile, stockAccountId, employeeId);
+  if (handledByAdminClient) {
+    revalidateStockAssignmentPaths(stockAccountId);
+    return;
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.rpc("add_stock_account_assignment", {
     p_stock_account_id: stockAccountId,
@@ -452,11 +648,7 @@ export async function addStockAccountAssignment(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(
-      error.message.includes("function") && error.message.includes("add_stock_account_assignment")
-        ? "Multiple assignment migration is not applied yet. Please run the new Supabase migration first."
-        : error.message
-    );
+    throw new Error(stockAssignmentSchemaMessage(error.message));
   }
 
   revalidateStockAssignmentPaths(stockAccountId);
@@ -487,6 +679,12 @@ export async function removeStockAccountAssignment(formData: FormData) {
     return;
   }
 
+  const handledByAdminClient = await removeStockAccountAssignmentWithAdmin(profile, stockAccountId, employeeId);
+  if (handledByAdminClient) {
+    revalidateStockAssignmentPaths(stockAccountId);
+    return;
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.rpc("remove_stock_account_assignment", {
     p_stock_account_id: stockAccountId,
@@ -494,11 +692,7 @@ export async function removeStockAccountAssignment(formData: FormData) {
   });
 
   if (error) {
-    throw new Error(
-      error.message.includes("function") && error.message.includes("remove_stock_account_assignment")
-        ? "Multiple assignment migration is not applied yet. Please run the new Supabase migration first."
-        : error.message
-    );
+    throw new Error(stockAssignmentSchemaMessage(error.message));
   }
 
   revalidateStockAssignmentPaths(stockAccountId);
