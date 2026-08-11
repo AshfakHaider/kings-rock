@@ -35,6 +35,10 @@ type TelegramMessage = {
   }>;
   reply_to_message?: TelegramMessage;
   message_id?: number;
+  sticker?: {
+    emoji?: string;
+    file_id?: string;
+  };
   text?: string;
 };
 
@@ -108,6 +112,16 @@ type TelegramGroupQueueEdit = {
   field: TelegramGroupQueueEditField;
   itemId: string;
   userId: string;
+};
+
+type TelegramGroupStockBlock = {
+  createdAt: string;
+  imageFileIds: string[];
+  sourceChatId: string;
+  sourceChatTitle?: string;
+  sourceMessageId?: number;
+  texts: string[];
+  updatedAt: string;
 };
 
 const DEFAULT_SETTINGS_PAYLOAD = {
@@ -316,6 +330,14 @@ function getGroupQueueEdits(settings: SettingsRow | null) {
     : {};
 }
 
+function getGroupBlocks(settings: SettingsRow | null) {
+  const permissions = settings?.employee_permissions;
+  const blocks = permissions?.telegram_group_stock_blocks;
+  return blocks && typeof blocks === "object" && !Array.isArray(blocks)
+    ? (blocks as Record<string, TelegramGroupStockBlock>)
+    : {};
+}
+
 function compactGroupQueue(queue: Record<string, TelegramGroupStockQueueItem>) {
   return Object.fromEntries(
     Object.values(queue)
@@ -332,6 +354,10 @@ function draftKey(chatId: number | string, userId: string) {
 
 function queueEditKey(chatId: number | string, userId: string) {
   return `${chatId}:${userId}`;
+}
+
+function groupBlockKey(chatId: number | string) {
+  return String(chatId);
 }
 
 async function saveDraft(key: string, draft: TelegramStockDraft | null) {
@@ -472,6 +498,40 @@ async function getGroupQueueEdit(key: string) {
   return getGroupQueueEdits(await getSettings())[key] ?? null;
 }
 
+async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null) {
+  const supabase = createAdminClient();
+  const settings = await getSettings();
+
+  if (!settings) {
+    throw new Error("Settings row was not found. Add settings first from the app.");
+  }
+
+  const permissions = {
+    ...(settings.employee_permissions ?? {})
+  };
+  const blocks = {
+    ...getGroupBlocks(settings)
+  };
+
+  if (block) {
+    blocks[key] = block;
+  } else {
+    delete blocks[key];
+  }
+
+  const { error } = await supabase
+    .from("settings")
+    .update({
+      employee_permissions: {
+        ...permissions,
+        telegram_group_stock_blocks: blocks
+      }
+    })
+    .eq("id", settings.id);
+
+  if (error) throw new Error(error.message);
+}
+
 async function addGameCategory(gameName: string) {
   const supabase = createAdminClient();
   const settings = await getSettings();
@@ -536,6 +596,11 @@ async function listGameCategories() {
 
 function messageText(message: TelegramMessage) {
   return (message.text ?? message.caption ?? "").trim();
+}
+
+function isCheckmarkSeparator(message: TelegramMessage, text: string) {
+  const normalizedText = text.replace(/\ufe0f/g, "").replace(/\s+/g, "");
+  return /^(?:✅|✔|☑)+$/.test(normalizedText) || message.sticker?.emoji === "✅";
 }
 
 function getImageFileIds(message: TelegramMessage) {
@@ -633,6 +698,50 @@ function parseAccountText(value: string, categories: string[]) {
     accountTitle: accountTitle || cleaned,
     gameName: inferGameName(secretCode, categories),
     secretCode
+  };
+}
+
+function looksLikePrivateNote(value: string) {
+  return /@|\)\(|gmail|outlook|hotmail|yahoo|password|pass|login/i.test(value);
+}
+
+function parseGroupBlock(block: TelegramGroupStockBlock, categories: string[]) {
+  let accountTitle = "";
+  let gameName = "";
+  let note = "";
+  let secretCode: string | null = null;
+  let sellingPrice: number | undefined;
+
+  for (const rawText of block.texts) {
+    const text = cleanStockText(rawText);
+    if (!text) continue;
+
+    const inlineSellingPrice = parseSellingPriceFromAccountText(text);
+    const standaloneMoney = parseMoney(text);
+    if (typeof sellingPrice !== "number" && (inlineSellingPrice !== null || standaloneMoney !== null)) {
+      sellingPrice = inlineSellingPrice ?? standaloneMoney ?? undefined;
+    }
+
+    if (extractSecretCode(text)) {
+      const parsed = parseAccountText(text, categories);
+      accountTitle = parsed.accountTitle;
+      gameName = parsed.gameName;
+      secretCode = parsed.secretCode;
+      continue;
+    }
+
+    if (looksLikePrivateNote(text)) {
+      note = [note, text].filter(Boolean).join("\n");
+    }
+  }
+
+  return {
+    accountTitle,
+    gameName: gameName || inferGameName(secretCode, categories),
+    imageFileIds: [...new Set(block.imageFileIds)].slice(0, 15),
+    note: note || undefined,
+    secretCode,
+    sellingPrice
   };
 }
 
@@ -1091,6 +1200,77 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
 
   if (!sourceChatId) return false;
 
+  const blockKey = groupBlockKey(sourceChatId);
+  const existingBlock = getGroupBlocks(settings)[blockKey];
+
+  if (isCheckmarkSeparator(message, text)) {
+    if (existingBlock && (existingBlock.texts.length || existingBlock.imageFileIds.length)) {
+      const settingsCategories = Array.isArray(settings?.game_categories) ? settings.game_categories : [];
+      const parsedBlock = parseGroupBlock(existingBlock, settingsCategories);
+
+      if (parsedBlock.accountTitle || parsedBlock.imageFileIds.length || parsedBlock.note || typeof parsedBlock.sellingPrice === "number") {
+        const duplicateStock = parsedBlock.accountTitle
+          ? await isDuplicateStockAccount(parsedBlock.secretCode, parsedBlock.accountTitle)
+          : false;
+
+        if (!duplicateStock) {
+          const duplicateQueueItem = parsedBlock.accountTitle
+            ? findGroupQueueDuplicate(
+                queue,
+                sourceChatId,
+                existingBlock.sourceMessageId ? undefined : mediaGroupId,
+                parsedBlock.secretCode,
+                parsedBlock.accountTitle
+              )
+            : null;
+          const item: TelegramGroupStockQueueItem = {
+            accountTitle: parsedBlock.accountTitle,
+            createdAt: duplicateQueueItem?.createdAt ?? existingBlock.createdAt,
+            gameName: parsedBlock.gameName,
+            id: duplicateQueueItem?.id ?? randomUUID(),
+            imageFileIds: [...new Set([...(duplicateQueueItem?.imageFileIds ?? []), ...parsedBlock.imageFileIds])].slice(0, 15),
+            mediaGroupId: existingBlock.sourceMessageId ? undefined : mediaGroupId,
+            note: parsedBlock.note ?? duplicateQueueItem?.note,
+            secretCode: parsedBlock.secretCode,
+            sellingPrice: parsedBlock.sellingPrice ?? duplicateQueueItem?.sellingPrice,
+            sourceChatId: String(sourceChatId),
+            sourceChatTitle: existingBlock.sourceChatTitle,
+            sourceMessageId: existingBlock.sourceMessageId,
+            status: "pending",
+            updatedAt: now
+          };
+
+          await saveGroupQueueItem(item);
+          if (!duplicateQueueItem) {
+            await notifyAllowedUsersAboutGroupItem(item);
+          }
+        }
+      }
+    }
+
+    await saveGroupBlock(blockKey, {
+      createdAt: now,
+      imageFileIds: [],
+      sourceChatId: String(sourceChatId),
+      sourceChatTitle: message.chat?.title ?? message.chat?.username,
+      sourceMessageId: message.message_id,
+      texts: [],
+      updatedAt: now
+    });
+    return true;
+  }
+
+  if (existingBlock) {
+    await saveGroupBlock(blockKey, {
+      ...existingBlock,
+      imageFileIds: [...new Set([...existingBlock.imageFileIds, ...imageFileIds])].slice(0, 15),
+      sourceMessageId: existingBlock.sourceMessageId ?? message.message_id,
+      texts: text ? [...existingBlock.texts, text] : existingBlock.texts,
+      updatedAt: now
+    });
+    return true;
+  }
+
   if (!text && imageFileIds.length && mediaGroupId) {
     const existingItem = Object.values(queue).find(
       (item) => item.sourceChatId === String(sourceChatId) && item.mediaGroupId === mediaGroupId
@@ -1410,7 +1590,7 @@ async function createDraftFromGroupQueueItem(chatId: number | string, userId: st
   const now = new Date().toISOString();
   let draft: TelegramStockDraft = {
     accountTitle: item.accountTitle,
-    buyingPrice: undefined,
+    buyingPrice: item.buyingPrice,
     chatId: String(chatId),
     createdAt: now,
     gameName: item.gameName,
@@ -1418,7 +1598,7 @@ async function createDraftFromGroupQueueItem(chatId: number | string, userId: st
     id: randomUUID(),
     imageFileIds: item.imageFileIds,
     mediaGroupId: item.mediaGroupId,
-    note: undefined,
+    note: item.note,
     secretCode: item.secretCode,
     sellingPrice: item.sellingPrice,
     stage: "collecting",
@@ -1731,6 +1911,7 @@ export async function POST(request: Request) {
   const chatId = message?.chat?.id;
   const userId = message?.from?.id ? String(message.from.id) : "";
   const text = message ? messageText(message) : "";
+  const isSeparatorMessage = message ? isCheckmarkSeparator(message, text) : false;
 
   if (callback && callbackChatId) {
     const allowedUserIds = getAllowedUserIds();
@@ -1749,7 +1930,7 @@ export async function POST(request: Request) {
     return jsonOk({ handled: true });
   }
 
-  if (!chatId || (!text && !getImageFileIds(message ?? {}).length)) return jsonOk();
+  if (!chatId || (!text && !getImageFileIds(message ?? {}).length && !isSeparatorMessage)) return jsonOk();
 
   if (!hasSupabaseEnv() || !hasSupabaseAdminEnv()) {
     if (!message || !isGroupChat(message)) {
@@ -1774,7 +1955,7 @@ export async function POST(request: Request) {
   if (isHelpCommand(text)) {
     await sendTelegramMessage(
       chatId,
-      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/addallmissing - approve complete missing accounts\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, send Gmail/password private note, selling price, then buying price.\n\nGroup scanner: add me to a group and disable BotFather privacy mode. I will collect missing account posts privately for review."
+      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/addallmissing - approve complete accounts\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, send Gmail/password private note, selling price, then buying price.\n\nGroup scanner: send ✅, then the account images/title/private note/selling price in any order, then ✅ again. I will collect one account block and send private preview buttons."
     );
     return jsonOk({ handled: true });
   }
