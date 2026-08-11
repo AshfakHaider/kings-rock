@@ -886,7 +886,6 @@ async function uploadTelegramImages(fileIds: string[]) {
 
 function nextDraftStage(draft: TelegramStockDraft): TelegramStockDraft["stage"] {
   if (typeof draft.buyingPrice === "number") return "ready_for_approval";
-  if (typeof draft.sellingPrice === "number") return "awaiting_buying_price";
   return "collecting";
 }
 
@@ -895,7 +894,6 @@ function missingApprovalFields(draft: TelegramStockDraft) {
   if (!draft.accountTitle) missing.push("title");
   if (!draft.imageFileIds.length) missing.push("image");
   if (!draft.note) missing.push("private note");
-  if (typeof draft.sellingPrice !== "number") missing.push("selling price");
   if (typeof draft.buyingPrice !== "number") missing.push("buying price");
   return missing;
 }
@@ -908,7 +906,6 @@ function nextDraftInstruction(draft: TelegramStockDraft) {
   if (nextMissing === "title") return "Next: forward or send the account title with code, like ML# 1632 ...";
   if (nextMissing === "image") return "Next: forward or upload at least one account image.";
   if (nextMissing === "private note") return "Next: send Gmail/password private note.";
-  if (nextMissing === "selling price") return "Next: send selling price, like 15$ or Price: 15$.";
   return "Next: send buying price, like 10 or $10.";
 }
 
@@ -922,7 +919,7 @@ function draftPreviewText(draft: TelegramStockDraft) {
     `Title: ${draft.accountTitle ?? "missing"}`,
     `Images: ${draft.imageFileIds.length}/15`,
     draft.note ? "Private note: saved" : "Private note: missing",
-    typeof draft.sellingPrice === "number" ? `Selling price: $${draft.sellingPrice}` : "Selling price: missing",
+    typeof draft.sellingPrice === "number" ? `Selling price: $${draft.sellingPrice}` : "Selling price: not set",
     typeof draft.buyingPrice === "number" ? `Buying price: $${draft.buyingPrice}` : "Buying price: missing",
     "",
     missing.length ? `Missing: ${missing.join(", ")}` : null,
@@ -979,7 +976,7 @@ function groupQueueItemText(item: TelegramGroupStockQueueItem, index?: number, t
     `Title: ${item.accountTitle}`,
     `Images: ${item.imageFileIds.length}/15`,
     item.note ? "Private note: saved" : "Private note: missing",
-    typeof item.sellingPrice === "number" ? `Selling price: $${item.sellingPrice}` : "Selling price: missing",
+    typeof item.sellingPrice === "number" ? `Selling price: $${item.sellingPrice}` : "Selling price: not set",
     typeof item.buyingPrice === "number" ? `Buying price: $${item.buyingPrice}` : "Buying price: missing",
     item.sourceChatTitle ? `Source: ${item.sourceChatTitle}` : null,
     "",
@@ -996,7 +993,6 @@ function missingGroupQueueFields(item: TelegramGroupStockQueueItem) {
   if (!item.accountTitle) missing.push("title");
   if (!item.imageFileIds.length) missing.push("image");
   if (!item.note) missing.push("private note");
-  if (typeof item.sellingPrice !== "number") missing.push("selling price");
   if (typeof item.buyingPrice !== "number") missing.push("buying price");
   return missing;
 }
@@ -1085,7 +1081,6 @@ async function notifyAllowedUsersAboutGroupItem(item: TelegramGroupStockQueueIte
 async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPrice: number) {
   if (!draft.accountTitle) throw new Error("Account title is missing.");
   if (!draft.imageFileIds.length) throw new Error("At least one account image is required.");
-  if (typeof draft.sellingPrice !== "number") throw new Error("Selling price is missing.");
 
   const gameName = await ensureGameCategory(draft.gameName ?? inferGameName(draft.secretCode, await listGameCategories()));
   await assertNoDuplicateStockAccount(draft.secretCode, draft.accountTitle);
@@ -1104,7 +1099,7 @@ async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPric
       purchase_date: dhakaToday(),
       purchase_source: "Telegram",
       secret_code: draft.secretCode,
-      selling_price: draft.sellingPrice,
+      selling_price: draft.sellingPrice ?? null,
       status: "available"
     })
     .select("id,secret_code,account_title")
@@ -1519,7 +1514,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
   }
 
   if (existingDraft) {
-    const sellingPrice = parseSellingPrice(text);
+    const sellingPrice = /(?:price|selling|sell)/i.test(text) ? parseSellingPrice(text) : null;
     if (sellingPrice !== null) {
       let draft: TelegramStockDraft = {
         ...existingDraft,
@@ -1532,7 +1527,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
       return true;
     }
 
-    const buyingPrice = typeof existingDraft.sellingPrice === "number" ? parseMoney(text) : null;
+    const buyingPrice = parseMoney(text);
     if (buyingPrice !== null) {
       let draft: TelegramStockDraft = {
         ...existingDraft,
@@ -1676,7 +1671,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
           created.secret_code ? `Code: ${created.secret_code}` : null,
           `Title: ${created.account_title}`,
           `Buying: $${item.buyingPrice}`,
-          `Selling: $${item.sellingPrice}`
+          typeof item.sellingPrice === "number" ? `Selling: $${item.sellingPrice}` : "Selling: not set"
         ]
           .filter(Boolean)
           .join("\n");
@@ -1862,7 +1857,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
       created.secret_code ? `Code: ${created.secret_code}` : null,
       `Title: ${created.account_title}`,
       `Buying: $${draft.buyingPrice}`,
-      `Selling: $${draft.sellingPrice}`
+      typeof draft.sellingPrice === "number" ? `Selling: $${draft.sellingPrice}` : "Selling: not set"
     ]
       .filter(Boolean)
       .join("\n");
@@ -1955,7 +1950,7 @@ export async function POST(request: Request) {
   if (isHelpCommand(text)) {
     await sendTelegramMessage(
       chatId,
-      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/addallmissing - approve complete accounts\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, send Gmail/password private note, selling price, then buying price.\n\nGroup scanner: send ✅, then the account images/title/private note/selling price in any order, then ✅ again. I will collect one account block and send private preview buttons."
+      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/addallmissing - approve complete accounts\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, send Gmail/password private note, then buying price. Selling price is optional and can be added later.\n\nGroup scanner: send ✅, then the account images/title/private note/selling price in any order, then ✅ again. Selling price can be missing. I will collect one account block and send private preview buttons."
     );
     return jsonOk({ handled: true });
   }
