@@ -53,6 +53,7 @@ type TelegramCallbackQuery = {
 
 type TelegramUpdate = {
   callback_query?: TelegramCallbackQuery;
+  edited_message?: TelegramMessage;
   message?: TelegramMessage;
 };
 
@@ -498,7 +499,7 @@ async function getGroupQueueEdit(key: string) {
   return getGroupQueueEdits(await getSettings())[key] ?? null;
 }
 
-async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null) {
+async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null, mode: "replace" | "merge" = "replace") {
   const supabase = createAdminClient();
   const settings = await getSettings();
 
@@ -514,7 +515,17 @@ async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null
   };
 
   if (block) {
-    blocks[key] = block;
+    const existingBlock = mode === "merge" ? blocks[key] : null;
+    blocks[key] = existingBlock
+      ? {
+          ...existingBlock,
+          ...block,
+          createdAt: existingBlock.createdAt,
+          imageFileIds: [...new Set([...existingBlock.imageFileIds, ...block.imageFileIds])].slice(0, 15),
+          texts: [...new Set([...existingBlock.texts, ...block.texts])],
+          updatedAt: block.updatedAt
+        }
+      : block;
   } else {
     delete blocks[key];
   }
@@ -600,7 +611,11 @@ function messageText(message: TelegramMessage) {
 
 function isCheckmarkSeparator(message: TelegramMessage, text: string) {
   const normalizedText = text.replace(/\ufe0f/g, "").replace(/\s+/g, "");
-  return /^(?:✅|✔|☑)+$/.test(normalizedText) || message.sticker?.emoji === "✅";
+  const normalizedStickerEmoji = (message.sticker?.emoji ?? "").replace(/\ufe0f/g, "").replace(/\s+/g, "");
+  const stickerOnlyMessage =
+    Boolean(message.sticker?.file_id) && !text && !message.photo?.length && !message.document?.file_id;
+
+  return /^(?:✅|✔|☑)+$/.test(normalizedText) || /^(?:✅|✔|☑)+$/.test(normalizedStickerEmoji) || stickerOnlyMessage;
 }
 
 function getImageFileIds(message: TelegramMessage) {
@@ -1258,11 +1273,11 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
   if (existingBlock) {
     await saveGroupBlock(blockKey, {
       ...existingBlock,
-      imageFileIds: [...new Set([...existingBlock.imageFileIds, ...imageFileIds])].slice(0, 15),
+      imageFileIds,
       sourceMessageId: existingBlock.sourceMessageId ?? message.message_id,
-      texts: text ? [...existingBlock.texts, text] : existingBlock.texts,
+      texts: text ? [text] : [],
       updatedAt: now
-    });
+    }, "merge");
     return true;
   }
 
@@ -1902,7 +1917,7 @@ export async function POST(request: Request) {
   const callback = update.callback_query;
   const callbackChatId = callback?.message?.chat?.id;
   const callbackUserId = callback?.from?.id ? String(callback.from.id) : "";
-  const message = update.message;
+  const message = update.message ?? update.edited_message;
   const chatId = message?.chat?.id;
   const userId = message?.from?.id ? String(message.from.id) : "";
   const text = message ? messageText(message) : "";
