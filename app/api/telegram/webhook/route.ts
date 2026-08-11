@@ -138,9 +138,14 @@ const DEFAULT_SETTINGS_PAYLOAD = {
 };
 const TELEGRAM_IMAGE_MAX_DIMENSION = 1600;
 const TELEGRAM_IMAGE_QUALITY = 76;
+const TELEGRAM_GROUP_CLOSE_DELAY_MS = 1500;
 
 function jsonOk(extra: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: true, ...extra });
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function botToken() {
@@ -361,6 +366,42 @@ function groupBlockKey(chatId: number | string) {
   return String(chatId);
 }
 
+function mergeGroupBlock(existingBlock: TelegramGroupStockBlock, block: TelegramGroupStockBlock): TelegramGroupStockBlock {
+  return {
+    ...existingBlock,
+    ...block,
+    createdAt: existingBlock.createdAt,
+    imageFileIds: [...new Set([...existingBlock.imageFileIds, ...block.imageFileIds])].slice(0, 15),
+    texts: [...new Set([...existingBlock.texts, ...block.texts])],
+    updatedAt: block.updatedAt
+  };
+}
+
+function blockContainsFragment(block: TelegramGroupStockBlock | undefined, fragment: TelegramGroupStockBlock) {
+  if (!block) return false;
+
+  return (
+    fragment.imageFileIds.every((fileId) => block.imageFileIds.includes(fileId)) &&
+    fragment.texts.every((text) => block.texts.includes(text))
+  );
+}
+
+function isGroupStockFragment(text: string, imageFileIds: string[]) {
+  if (imageFileIds.length) return true;
+  if (!text || text.startsWith("/")) return false;
+  return Boolean(extractSecretCode(text) || looksLikePrivateNote(text) || parseMoney(text) !== null);
+}
+
+function isEmptyShellGroupQueueItem(item: TelegramGroupStockQueueItem) {
+  return (
+    Boolean(item.accountTitle) &&
+    !item.imageFileIds.length &&
+    !item.note &&
+    typeof item.sellingPrice !== "number" &&
+    typeof item.buyingPrice !== "number"
+  );
+}
+
 async function saveDraft(key: string, draft: TelegramStockDraft | null) {
   const supabase = createAdminClient();
   const settings = await getSettings();
@@ -516,16 +557,7 @@ async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null
 
   if (block) {
     const existingBlock = mode === "merge" ? blocks[key] : null;
-    blocks[key] = existingBlock
-      ? {
-          ...existingBlock,
-          ...block,
-          createdAt: existingBlock.createdAt,
-          imageFileIds: [...new Set([...existingBlock.imageFileIds, ...block.imageFileIds])].slice(0, 15),
-          texts: [...new Set([...existingBlock.texts, ...block.texts])],
-          updatedAt: block.updatedAt
-        }
-      : block;
+    blocks[key] = existingBlock ? mergeGroupBlock(existingBlock, block) : block;
   } else {
     delete blocks[key];
   }
@@ -541,6 +573,93 @@ async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null
     .eq("id", settings.id);
 
   if (error) throw new Error(error.message);
+}
+
+async function appendGroupBlockFragment(key: string, fragment: TelegramGroupStockBlock) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await saveGroupBlock(key, fragment, "merge");
+    await sleep(120 * (attempt + 1));
+
+    const latestBlock = getGroupBlocks(await getSettings())[key];
+    if (blockContainsFragment(latestBlock, fragment)) return;
+  }
+}
+
+function shouldQueueParsedGroupBlock(parsedBlock: ReturnType<typeof parseGroupBlock>) {
+  if (!parsedBlock.accountTitle && !parsedBlock.imageFileIds.length && !parsedBlock.note && typeof parsedBlock.sellingPrice !== "number") {
+    return false;
+  }
+
+  return !(
+    parsedBlock.accountTitle &&
+    !parsedBlock.imageFileIds.length &&
+    !parsedBlock.note &&
+    typeof parsedBlock.sellingPrice !== "number"
+  );
+}
+
+async function queueGroupBlock(block: TelegramGroupStockBlock, notify = true) {
+  const settings = await getSettings();
+  const queue = getGroupQueue(settings);
+  const settingsCategories = Array.isArray(settings?.game_categories) ? settings.game_categories : [];
+  const parsedBlock = parseGroupBlock(block, settingsCategories);
+  const now = new Date().toISOString();
+
+  if (!shouldQueueParsedGroupBlock(parsedBlock)) return false;
+
+  const duplicateStock = parsedBlock.accountTitle
+    ? await isDuplicateStockAccount(parsedBlock.secretCode, parsedBlock.accountTitle)
+    : false;
+
+  if (duplicateStock) return true;
+
+  const duplicateQueueItem = parsedBlock.accountTitle
+    ? findGroupQueueDuplicate(
+        queue,
+        block.sourceChatId,
+        undefined,
+        parsedBlock.secretCode,
+        parsedBlock.accountTitle
+      )
+    : null;
+
+  const item: TelegramGroupStockQueueItem = {
+    accountTitle: parsedBlock.accountTitle,
+    createdAt: duplicateQueueItem?.createdAt ?? block.createdAt,
+    gameName: parsedBlock.gameName,
+    id: duplicateQueueItem?.id ?? randomUUID(),
+    imageFileIds: [...new Set([...(duplicateQueueItem?.imageFileIds ?? []), ...parsedBlock.imageFileIds])].slice(0, 15),
+    note: parsedBlock.note ?? duplicateQueueItem?.note,
+    secretCode: parsedBlock.secretCode,
+    sellingPrice: parsedBlock.sellingPrice ?? duplicateQueueItem?.sellingPrice,
+    sourceChatId: block.sourceChatId,
+    sourceChatTitle: block.sourceChatTitle,
+    sourceMessageId: block.sourceMessageId,
+    status: "pending",
+    updatedAt: now
+  };
+
+  await saveGroupQueueItem(item);
+  if (notify && !duplicateQueueItem) {
+    await notifyAllowedUsersAboutGroupItem(item);
+  }
+
+  return true;
+}
+
+async function flushOpenGroupBlocks(notify = false) {
+  await sleep(TELEGRAM_GROUP_CLOSE_DELAY_MS);
+  const settings = await getSettings();
+  const blocks = getGroupBlocks(settings);
+
+  for (const [key, block] of Object.entries(blocks)) {
+    if (!block.texts.length && !block.imageFileIds.length) continue;
+
+    const queued = await queueGroupBlock(block, notify);
+    if (queued) {
+      await saveGroupBlock(key, null);
+    }
+  }
 }
 
 async function addGameCategory(gameName: string) {
@@ -609,20 +728,41 @@ function messageText(message: TelegramMessage) {
   return (message.text ?? message.caption ?? "").trim();
 }
 
+function largestTelegramPhoto(message: TelegramMessage) {
+  return message.photo?.length
+    ? [...message.photo].sort((a, b) => (b.file_size ?? b.width * b.height) - (a.file_size ?? a.width * a.height))[0]
+    : null;
+}
+
 function isCheckmarkSeparator(message: TelegramMessage, text: string) {
   const normalizedText = text.replace(/\ufe0f/g, "").replace(/\s+/g, "");
   const normalizedStickerEmoji = (message.sticker?.emoji ?? "").replace(/\ufe0f/g, "").replace(/\s+/g, "");
   const stickerOnlyMessage =
     Boolean(message.sticker?.file_id) && !text && !message.photo?.length && !message.document?.file_id;
+  const photo = largestTelegramPhoto(message);
+  const squareSmallPhotoOnly =
+    Boolean(photo) &&
+    !text &&
+    !message.document?.file_id &&
+    !message.sticker?.file_id &&
+    photo!.width >= 80 &&
+    photo!.height >= 80 &&
+    photo!.width <= 640 &&
+    photo!.height <= 640 &&
+    photo!.width / photo!.height > 0.75 &&
+    photo!.width / photo!.height < 1.33;
 
-  return /^(?:✅|✔|☑)+$/.test(normalizedText) || /^(?:✅|✔|☑)+$/.test(normalizedStickerEmoji) || stickerOnlyMessage;
+  return (
+    /^(?:✅|✔|☑)+$/.test(normalizedText) ||
+    /^(?:✅|✔|☑)+$/.test(normalizedStickerEmoji) ||
+    stickerOnlyMessage ||
+    squareSmallPhotoOnly
+  );
 }
 
 function getImageFileIds(message: TelegramMessage) {
   const ids: string[] = [];
-  const largestPhoto = message.photo?.length
-    ? [...message.photo].sort((a, b) => (b.file_size ?? b.width * b.height) - (a.file_size ?? a.width * a.height))[0]
-    : null;
+  const largestPhoto = largestTelegramPhoto(message);
 
   if (largestPhoto?.file_id) ids.push(largestPhoto.file_id);
   if (message.document?.file_id && message.document.mime_type?.startsWith("image/")) {
@@ -1061,9 +1201,9 @@ async function sendOrUpdateDraftPreview(chatId: number | string, draft: Telegram
 
 async function pendingGroupQueueItems() {
   const queue = getGroupQueue(await getSettings());
-  return Object.values(queue).sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
+  return Object.values(queue)
+    .filter((item) => !isEmptyShellGroupQueueItem(item))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
 async function sendNextGroupQueueItem(chatId: number | string) {
@@ -1215,46 +1355,11 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
 
   if (isCheckmarkSeparator(message, text)) {
     if (existingBlock && (existingBlock.texts.length || existingBlock.imageFileIds.length)) {
-      const settingsCategories = Array.isArray(settings?.game_categories) ? settings.game_categories : [];
-      const parsedBlock = parseGroupBlock(existingBlock, settingsCategories);
-
-      if (parsedBlock.accountTitle || parsedBlock.imageFileIds.length || parsedBlock.note || typeof parsedBlock.sellingPrice === "number") {
-        const duplicateStock = parsedBlock.accountTitle
-          ? await isDuplicateStockAccount(parsedBlock.secretCode, parsedBlock.accountTitle)
-          : false;
-
-        if (!duplicateStock) {
-          const duplicateQueueItem = parsedBlock.accountTitle
-            ? findGroupQueueDuplicate(
-                queue,
-                sourceChatId,
-                existingBlock.sourceMessageId ? undefined : mediaGroupId,
-                parsedBlock.secretCode,
-                parsedBlock.accountTitle
-              )
-            : null;
-          const item: TelegramGroupStockQueueItem = {
-            accountTitle: parsedBlock.accountTitle,
-            createdAt: duplicateQueueItem?.createdAt ?? existingBlock.createdAt,
-            gameName: parsedBlock.gameName,
-            id: duplicateQueueItem?.id ?? randomUUID(),
-            imageFileIds: [...new Set([...(duplicateQueueItem?.imageFileIds ?? []), ...parsedBlock.imageFileIds])].slice(0, 15),
-            mediaGroupId: existingBlock.sourceMessageId ? undefined : mediaGroupId,
-            note: parsedBlock.note ?? duplicateQueueItem?.note,
-            secretCode: parsedBlock.secretCode,
-            sellingPrice: parsedBlock.sellingPrice ?? duplicateQueueItem?.sellingPrice,
-            sourceChatId: String(sourceChatId),
-            sourceChatTitle: existingBlock.sourceChatTitle,
-            sourceMessageId: existingBlock.sourceMessageId,
-            status: "pending",
-            updatedAt: now
-          };
-
-          await saveGroupQueueItem(item);
-          if (!duplicateQueueItem) {
-            await notifyAllowedUsersAboutGroupItem(item);
-          }
-        }
+      await sleep(TELEGRAM_GROUP_CLOSE_DELAY_MS);
+      const latestBlock = getGroupBlocks(await getSettings())[blockKey] ?? existingBlock;
+      const queued = await queueGroupBlock(latestBlock);
+      if (queued) {
+        await saveGroupBlock(blockKey, null);
       }
     }
 
@@ -1271,13 +1376,26 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
   }
 
   if (existingBlock) {
-    await saveGroupBlock(blockKey, {
+    await appendGroupBlockFragment(blockKey, {
       ...existingBlock,
       imageFileIds,
       sourceMessageId: existingBlock.sourceMessageId ?? message.message_id,
       texts: text ? [text] : [],
       updatedAt: now
-    }, "merge");
+    });
+    return true;
+  }
+
+  if (isGroupStockFragment(text, imageFileIds)) {
+    await appendGroupBlockFragment(blockKey, {
+      createdAt: now,
+      imageFileIds,
+      sourceChatId: String(sourceChatId),
+      sourceChatTitle: message.chat?.title ?? message.chat?.username,
+      sourceMessageId: message.message_id,
+      texts: text ? [text] : [],
+      updatedAt: now
+    });
     return true;
   }
 
@@ -1633,6 +1751,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
 
     if (action === "bulk") {
       await answerTelegramCallback(callback.id, "Approving complete accounts...");
+      await flushOpenGroupBlocks(false);
       const result = await approveCompleteGroupQueueItems(chatId, userId);
       const lines = [
         `Bulk approval finished.`,
@@ -1997,11 +2116,13 @@ export async function POST(request: Request) {
   }
 
   if (isReviewMissingCommand(text)) {
+    await flushOpenGroupBlocks(false);
     await sendNextGroupQueueItem(chatId);
     return jsonOk({ handled: true });
   }
 
   if (isApproveAllMissingCommand(text)) {
+    await flushOpenGroupBlocks(false);
     const result = await approveCompleteGroupQueueItems(chatId, userId);
     await sendTelegramMessage(
       chatId,
