@@ -11,6 +11,7 @@
     "analyze": "ANALYZE=true next build",
     "start": "next start",
     "start:render": "HOSTNAME=0.0.0.0 PORT=${PORT:-10000} node .next/standalone/server.js",
+    "test": "node --test tests/*.test.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "live:create-admin": "node scripts/create-live-admin.cjs"

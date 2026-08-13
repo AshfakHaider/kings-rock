@@ -331,12 +331,23 @@ using (auth.uid() is not null);
 
 create policy "profiles admin manager insert"
 on public.profiles for insert
-with check (public.is_manager_or_admin());
+with check (
+  public.is_admin()
+  or (public.current_app_role() = 'manager' and role = 'employee')
+);
 
 create policy "profiles admin manager update"
 on public.profiles for update
-using (public.is_manager_or_admin() or id = public.current_profile_id())
-with check (public.is_manager_or_admin() or id = public.current_profile_id());
+using (
+  public.is_admin()
+  or (public.current_app_role() = 'manager' and role = 'employee')
+  or (id = public.current_profile_id() and role = public.current_app_role())
+)
+with check (
+  public.is_admin()
+  or (public.current_app_role() = 'manager' and role = 'employee')
+  or (id = public.current_profile_id() and role = public.current_app_role())
+);
 
 create policy "stock read authenticated"
 on public.stock_accounts for select

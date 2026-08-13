@@ -9,6 +9,7 @@ import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv } 
 import { encryptSecret } from "@/lib/crypto";
 import { getCurrentProfile } from "@/lib/data";
 import { canonicalSaleSource, canonicalSaleSourceKey, uniqueSaleSourceOptions } from "@/lib/sale-sources";
+import { assertCanSaveEmployeeRole } from "@/lib/security/employee-role-policy";
 import { cleanSecretCode, cleanStockText, stripSecretCodeFromTitle } from "@/lib/stock-title";
 import {
   addDemoSale,
@@ -1344,14 +1345,21 @@ export async function saveEmployee(formData: FormData) {
   const email = text(formData, "email");
   const phone = text(formData, "phone");
   const password = text(formData, "password");
-  const role = text(formData, "role") ?? "employee";
+  const role = (text(formData, "role") ?? "employee") as Profile["role"];
   const currentProfile = await getCurrentProfile();
 
-  if (currentProfile.role === "employee") {
-    throw new Error("Employees cannot create employee accounts.");
-  }
+  let existingProfile: Pick<Profile, "id" | "role"> | null = null;
 
   if (!hasSupabaseEnv()) {
+    existingProfile = id
+      ? ((await getDemoProfiles()).find((profile) => profile.id === id) ?? null)
+      : null;
+    assertCanSaveEmployeeRole({
+      callerRole: currentProfile.role,
+      submittedRole: role,
+      existingRole: existingProfile?.role
+    });
+
     const now = new Date().toISOString();
     await upsertDemoProfile({
       id: id ?? `employee-${randomUUID()}`,
@@ -1371,6 +1379,20 @@ export async function saveEmployee(formData: FormData) {
 
   const supabase = await createClient();
   let authUserId = text(formData, "auth_user_id");
+
+  if (id) {
+    const { data, error } = await supabase.from("profiles").select("id,role").eq("id", id).single();
+    if (error) {
+      throw new Error(error.message);
+    }
+    existingProfile = data;
+  }
+
+  assertCanSaveEmployeeRole({
+    callerRole: currentProfile.role,
+    submittedRole: role,
+    existingRole: existingProfile?.role
+  });
 
   if (!id) {
     if (!email) throw new Error("Employee email is required.");
