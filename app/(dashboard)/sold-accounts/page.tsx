@@ -33,7 +33,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
     getCurrentProfile()
   ]);
   const canViewProfit = currentProfile.role !== "employee";
-  const canManageSales = currentProfile.role !== "employee";
+  const canDeleteSales = currentProfile.role !== "employee";
   const soldAccounts =
     currentProfile.role === "employee"
       ? allSoldAccounts.filter((sale) => sale.employee_id === currentProfile.id)
@@ -134,18 +134,16 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
             { key: "amount", header: "Amount", cell: (row) => money(row.sold_amount, settings.currency) },
             { key: "source", header: "Source", cell: (row) => canonicalSaleSource(row.sold_source_website), searchValue: (row) => canonicalSaleSource(row.sold_source_website) },
             { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
-            ...(canManageSales
-              ? [{
-                  key: "action",
-                  header: "Action",
-                  cell: (row: SoldRow) => (
-                    <form action={markSalePaid}>
-                      <input type="hidden" name="id" value={row.id} />
-                      <Button size="sm">Mark paid</Button>
-                    </form>
-                  )
-                } as const]
-              : [])
+            {
+              key: "action",
+              header: "Action",
+              cell: (row: SoldRow) => (
+                <form action={markSalePaid}>
+                  <input type="hidden" name="id" value={row.id} />
+                  <Button size="sm">Mark paid</Button>
+                </form>
+              )
+            }
           ]}
         />
       </section>
@@ -247,8 +245,18 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
           { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
           { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
           { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" },
-          ...(canManageSales
+          ...(!canDeleteSales
             ? [{
+                key: "actions",
+                header: "Actions",
+                cell: (row: SoldRow) => !isPaidSale(row) ? (
+                  <form action={markSalePaid}>
+                    <input type="hidden" name="id" value={row.id} />
+                    <Button size="sm">Mark paid</Button>
+                  </form>
+                ) : "-"
+              } as const]
+            : [{
                 key: "actions",
                 header: "Actions",
                 cell: (row: SoldRow) => (
@@ -265,8 +273,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
                     </form>
                   </div>
                 )
-              } as const]
-            : [])
+              } as const])
         ]}
       />
     </>

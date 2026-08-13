@@ -1156,12 +1156,11 @@ export async function markSalePaid(formData: FormData) {
   const paymentMethod = text(formData, "payment_method");
   const paidNote = text(formData, "notes");
 
-  if (profile.role === "employee") {
-    throw new Error("Employees cannot mark payments as paid.");
-  }
-
   if (!hasSupabaseEnv()) {
     const sale = (await getDemoSoldAccounts()).find((item) => item.id === id);
+    if (profile.role === "employee" && sale?.employee_id !== profile.id) {
+      throw new Error("Employees can only mark their own sales as paid.");
+    }
     if (sale) {
       await upsertDemoSale({
         ...sale,
@@ -1183,7 +1182,15 @@ export async function markSalePaid(formData: FormData) {
 
   const supabase = await createClient();
   const { data: oldData } = await supabase.from("sold_accounts").select(SOLD_ACCOUNT_SELECT).eq("id", id).single();
-  let result = await supabase
+  if (!oldData) {
+    throw new Error("Sale was not found.");
+  }
+  if (profile.role === "employee" && oldData.employee_id !== profile.id) {
+    throw new Error("Employees can only mark their own sales as paid.");
+  }
+
+  const updateClient = hasSupabaseAdminEnv() ? createAdminClient() : supabase;
+  let query = updateClient
     .from("sold_accounts")
     .update({
       payment_status: "paid",
@@ -1191,24 +1198,32 @@ export async function markSalePaid(formData: FormData) {
       payment_received_date: new Date().toISOString().slice(0, 10),
       notes: paidNote ?? oldData?.notes ?? null
     })
-    .eq("id", id)
-    .select()
-    .single();
+    .eq("id", id);
+
+  if (profile.role === "employee") {
+    query = query.eq("employee_id", profile.id);
+  }
+
+  let result = await query.select().single();
 
   if (
     result.error &&
     (result.error.message.includes("payment_received_date") || result.error.message.includes("schema cache"))
   ) {
-    result = await supabase
+    let fallbackQuery = updateClient
       .from("sold_accounts")
       .update({
         payment_status: "paid",
         payment_method: paymentMethod ?? oldData?.payment_method ?? null,
         notes: paidNote ?? oldData?.notes ?? null
       })
-      .eq("id", id)
-      .select()
-      .single();
+      .eq("id", id);
+
+    if (profile.role === "employee") {
+      fallbackQuery = fallbackQuery.eq("employee_id", profile.id);
+    }
+
+    result = await fallbackQuery.select().single();
   }
 
   if (result.error) {
