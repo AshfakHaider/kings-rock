@@ -80,7 +80,17 @@ export default async function SalesPage({ searchParams }: { searchParams?: Promi
             searchValue: (row) => assignedEmployeeNames(row).join(" ")
           },
           { key: "status", header: "Status", cell: (row) => <StatusBadge value={row.status} />, searchValue: (row) => row.status },
-          { key: "actions", header: "Action", cell: (row) => <MarkSoldModal account={withoutImages(row)} employees={employees} /> }
+          {
+            key: "actions",
+            header: "Action",
+            cell: (row) => (
+              <MarkSoldModal
+                account={withoutImages(row)}
+                employees={employees}
+                sourceWebsites={settings.sale_source_websites}
+              />
+            )
+          }
         ]}
       />
     </>

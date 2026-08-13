@@ -28,6 +28,7 @@ import {
   isAccountAssignedTo
 } from "@/lib/data";
 import { getAdvanceBalance, getProfit, isPaidSale, saleCashDate } from "@/lib/metrics";
+import { canonicalSaleSource } from "@/lib/sale-sources";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -270,7 +271,7 @@ export default async function EmployeeDetailPage({
                     { key: "profit", header: "Profit", cell: (row: (typeof sales)[number]) => isPaidSale(row) ? money(getProfit(row), settings.currency) : "Waiting payment" } as const
                   ]
                 : []),
-              { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
+              { key: "source", header: "Source", cell: (row) => canonicalSaleSource(row.sold_source_website), searchValue: (row) => canonicalSaleSource(row.sold_source_website) },
               { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
               { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
               { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" }

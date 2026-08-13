@@ -5,6 +5,7 @@ import type {
   SoldAccount,
   StockAccount
 } from "@/lib/types";
+import { canonicalSaleSource, canonicalSaleSourceKey } from "@/lib/sale-sources";
 
 export function getProfit(sale: SoldAccount) {
   return Number(sale.sold_amount) - Number(sale.stock_account?.buying_price ?? 0);
@@ -123,8 +124,9 @@ export function salesBySource(sales: SoldAccount[]) {
   const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
 
   for (const sale of paidSales(sales)) {
-    const source = sale.sold_source_website?.trim() || "Unknown";
-    const item = buckets.get(source.toLowerCase()) ?? {
+    const source = canonicalSaleSource(sale.sold_source_website);
+    const key = canonicalSaleSourceKey(source);
+    const item = buckets.get(key) ?? {
       source,
       soldCount: 0,
       totalSales: 0,
@@ -134,7 +136,7 @@ export function salesBySource(sales: SoldAccount[]) {
     item.soldCount += 1;
     item.totalSales += Number(sale.sold_amount);
     item.profit += getProfit(sale);
-    buckets.set(source.toLowerCase(), item);
+    buckets.set(key, item);
   }
 
   return Array.from(buckets.values()).sort((a, b) => b.soldCount - a.soldCount || b.totalSales - a.totalSales);

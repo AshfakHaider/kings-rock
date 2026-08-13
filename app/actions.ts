@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { createAdminClient, createClient, hasSupabaseAdminEnv, hasSupabaseEnv } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { getCurrentProfile } from "@/lib/data";
+import { canonicalSaleSource, canonicalSaleSourceKey, uniqueSaleSourceOptions } from "@/lib/sale-sources";
 import { cleanSecretCode, cleanStockText, stripSecretCodeFromTitle } from "@/lib/stock-title";
 import {
   addDemoSale,
@@ -58,7 +59,7 @@ const DEFAULT_SETTINGS_PAYLOAD = {
   business_name: "Kings Rock",
   currency: "USD",
   game_categories: ["Mobile Legends", "Clash of Clans"],
-  sale_source_websites: ["Facebook", "PlayerAuctions", "G2G", "Discord"],
+  sale_source_websites: ["Facebook", "PlayerAuctions", "G2G", "Discord", "FunPay", "Eldorado", "Igitems", "U7BUY"],
   expense_categories: ["gmail_purchase", "ads", "website_fee", "employee_payment", "scam_account", "refund_account", "other"],
   employee_permissions: {
     can_view_profit: false,
@@ -70,6 +71,47 @@ type AssignmentActionResult = {
   ok: boolean;
   message?: string;
 };
+
+function saleSourceFromFormData(formData: FormData) {
+  const selectedSource = text(formData, "sold_source_website");
+  const customSource = text(formData, "sold_source_website_custom");
+  return canonicalSaleSource(selectedSource === "__new" ? customSource : selectedSource);
+}
+
+async function rememberSaleSourceWebsite(source: string) {
+  if (!hasSupabaseEnv() || source === "Unknown") return;
+
+  const supabase = hasSupabaseAdminEnv() ? createAdminClient() : await createClient();
+  const { data: settings, error: fetchError } = await supabase
+    .from("settings")
+    .select("id,sale_source_websites")
+    .limit(1)
+    .maybeSingle();
+
+  if (fetchError) return;
+
+  if (!settings) {
+    await supabase
+      .from("settings")
+      .insert({
+        ...DEFAULT_SETTINGS_PAYLOAD,
+        sale_source_websites: uniqueSaleSourceOptions([...DEFAULT_SETTINGS_PAYLOAD.sale_source_websites, source])
+      });
+    return;
+  }
+
+  const existingSources = Array.isArray(settings.sale_source_websites)
+    ? (settings.sale_source_websites as string[])
+    : [];
+  const nextSources = uniqueSaleSourceOptions([...existingSources, source]);
+  const existingKeySet = new Set(existingSources.map(canonicalSaleSourceKey));
+  if (existingKeySet.has(canonicalSaleSourceKey(source)) && nextSources.length === existingSources.length) return;
+
+  await supabase
+    .from("settings")
+    .update({ sale_source_websites: nextSources })
+    .eq("id", settings.id);
+}
 
 async function uploadStockImages(formData: FormData) {
   const files = getStockImageFiles(formData);
@@ -1032,6 +1074,7 @@ export async function saveSale(formData: FormData) {
 
     const soldDate = text(formData, "sold_date") ?? new Date().toISOString().slice(0, 10);
     const employeeId = profile.role === "employee" ? profile.id : text(formData, "employee_id") ?? profile.id;
+    const saleSource = saleSourceFromFormData(formData);
     const demoProfiles = await getDemoProfiles();
     const employee = demoProfiles.find((item) => item.id === employeeId) ?? profile;
     const sale: SoldAccount = {
@@ -1039,7 +1082,7 @@ export async function saveSale(formData: FormData) {
       stock_account_id: stockAccount.id,
       employee_id: employeeId,
       sold_amount: number(formData, "sold_amount"),
-      sold_source_website: text(formData, "sold_source_website"),
+      sold_source_website: saleSource,
       buyer_contact: null,
       payment_status: (text(formData, "payment_status") ?? "pending") as SoldAccount["payment_status"],
       payment_method: null,
@@ -1071,11 +1114,12 @@ export async function saveSale(formData: FormData) {
   const profile = await getCurrentProfile();
   const employeeId = profile.role === "employee" ? profile.id : text(formData, "employee_id") ?? profile.id;
   const paymentStatus = text(formData, "payment_status") ?? "pending";
+  const saleSource = saleSourceFromFormData(formData);
   const payload = {
     stock_account_id: text(formData, "stock_account_id"),
     employee_id: employeeId,
     sold_amount: number(formData, "sold_amount"),
-    sold_source_website: text(formData, "sold_source_website"),
+    sold_source_website: saleSource,
     buyer_contact: text(formData, "buyer_contact"),
     payment_status: paymentStatus,
     payment_method: text(formData, "payment_method"),
@@ -1097,6 +1141,7 @@ export async function saveSale(formData: FormData) {
     throw new Error(result.error.message);
   }
 
+  await rememberSaleSourceWebsite(saleSource);
   await logActivity(id ? "sale_edited" : "account_sold", "sold_accounts", id, oldData, result.data);
   revalidatePath("/sales");
   revalidatePath("/sold-accounts");
@@ -1652,10 +1697,12 @@ export async function saveSettings(formData: FormData) {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean),
-    sale_source_websites: String(formData.get("sale_source_websites") ?? "")
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    sale_source_websites: uniqueSaleSourceOptions(
+      String(formData.get("sale_source_websites") ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ),
     expense_categories: String(formData.get("expense_categories") ?? "")
       .split(",")
       .map((item) => item.trim())

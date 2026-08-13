@@ -9,21 +9,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NoticeToast } from "@/components/ui/notice-toast";
 import { Select } from "@/components/ui/select";
+import { canonicalSaleSource, uniqueSaleSourceOptions } from "@/lib/sale-sources";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import type { Profile, StockAccount } from "@/lib/types";
 
 export function MarkSoldModal({
   account,
-  employees
+  employees,
+  sourceWebsites
 }: {
   account: StockAccount;
   employees: Profile[];
+  sourceWebsites: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
+  const sourceOptions = useMemo(
+    () => uniqueSaleSourceOptions([...sourceWebsites, "FunPay", "Eldorado", "G2G", "Igitems", "U7BUY"]),
+    [sourceWebsites]
+  );
   const eligibleEmployees = useMemo(() => {
     const assignedIds = new Set<string>();
     if (account.assigned_employee_id) assignedIds.add(account.assigned_employee_id);
@@ -92,12 +100,31 @@ export function MarkSoldModal({
 
               <div className="space-y-2">
                 <Label htmlFor={`sold_source_${account.id}`}>Source</Label>
-                <Input
+                <Select
                   id={`sold_source_${account.id}`}
                   name="sold_source_website"
                   required
-                  placeholder="Facebook, G2G, Discord..."
-                />
+                  value={selectedSource}
+                  onChange={(event) => setSelectedSource(event.target.value)}
+                >
+                  <option value="">Select source</option>
+                  {sourceOptions.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                  <option value="__new">Add new source...</option>
+                </Select>
+                {selectedSource === "__new" ? (
+                  <Input
+                    name="sold_source_website_custom"
+                    required
+                    placeholder="Type new source, like Igitems"
+                    autoComplete="off"
+                  />
+                ) : selectedSource ? (
+                  <p className="text-xs text-muted-foreground">Saved as {canonicalSaleSource(selectedSource)}</p>
+                ) : null}
               </div>
 
               <div className="space-y-2">

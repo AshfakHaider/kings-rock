@@ -13,6 +13,7 @@ import {
   getStockAccounts
 } from "@/lib/data";
 import { getAdvanceBalance, getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
+import { canonicalSaleSource, canonicalSaleSourceKey } from "@/lib/sale-sources";
 import { formatDate, money } from "@/lib/utils";
 
 export default async function ReportsPage({
@@ -38,7 +39,7 @@ export default async function ReportsPage({
     const saleDate = new Date(sale.sold_date);
     if (params.employee && sale.employee_id !== params.employee) return false;
     if (params.game && sale.stock_account?.game_name !== params.game) return false;
-    if (params.source && sale.sold_source_website !== params.source) return false;
+    if (params.source && canonicalSaleSourceKey(sale.sold_source_website) !== canonicalSaleSourceKey(params.source)) return false;
     if (params.month && saleDate.getMonth() + 1 !== Number(params.month)) return false;
     if (params.year && saleDate.getFullYear() !== Number(params.year)) return false;
     if (params.from && sale.sold_date < params.from) return false;
@@ -58,7 +59,7 @@ export default async function ReportsPage({
           profit: isPaidSale(sale) ? getProfit(sale) : ""
         }
       : {}),
-    source: sale.sold_source_website,
+    source: canonicalSaleSource(sale.sold_source_website),
     payment_status: sale.payment_status,
     sold_date: sale.sold_date,
     paid_date: sale.payment_received_date
@@ -148,7 +149,7 @@ export default async function ReportsPage({
           ...(canViewFinancials
             ? [{ key: "profit", header: "Profit", cell: (row: SaleRow) => isPaidSale(row) ? money(getProfit(row), settings.currency) : "Waiting payment" } as const]
             : []),
-          { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-" },
+          { key: "source", header: "Source", cell: (row) => canonicalSaleSource(row.sold_source_website) },
           { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
           { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
           { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" }

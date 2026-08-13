@@ -48,6 +48,7 @@ import {
   stockQuantityByGame,
   stockValueByGame
 } from "@/lib/metrics";
+import { canonicalSaleSource, canonicalSaleSourceKey, mergeSourceSummaryRows, uniqueSaleSourceOptions } from "@/lib/sale-sources";
 import { normalizeCurrency } from "@/lib/utils";
 
 export const DEFAULT_PAGE_SIZE = 30;
@@ -394,7 +395,8 @@ function dashboardDateRange(year: number, month: number | "all") {
 function normalizeSettings(settings: Settings): Settings {
   return {
     ...settings,
-    currency: normalizeCurrency(settings.currency)
+    currency: normalizeCurrency(settings.currency),
+    sale_source_websites: uniqueSaleSourceOptions(settings.sale_source_websites ?? [])
   };
 }
 
@@ -477,12 +479,14 @@ function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnaps
       profit: Number(item.profit),
       sales: Number(item.sales)
     })),
-    salesBySource: (snapshot.salesBySource ?? []).map((item) => ({
-      source: item.source,
-      soldCount: Number(item.soldCount),
-      totalSales: Number(item.totalSales),
-      profit: Number(item.profit)
-    })),
+    salesBySource: mergeSourceSummaryRows(
+      (snapshot.salesBySource ?? []).map((item) => ({
+        source: item.source,
+        soldCount: Number(item.soldCount),
+        totalSales: Number(item.totalSales),
+        profit: Number(item.profit)
+      }))
+    ),
     stockValueByGame: (snapshot.stockValueByGame ?? []).map((item) => ({
       game: item.game,
       value: Number(item.value)
@@ -599,8 +603,8 @@ function dashboardSalesBySource(sales: SoldAccount[]) {
   const buckets = new Map<string, { source: string; soldCount: number; totalSales: number; profit: number }>();
 
   for (const sale of sales) {
-    const source = sale.sold_source_website?.trim() || "Unknown";
-    const key = source.toLowerCase();
+    const source = canonicalSaleSource(sale.sold_source_website);
+    const key = canonicalSaleSourceKey(source);
     const item = buckets.get(key) ?? {
       source,
       soldCount: 0,

@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_PAGE_SIZE, getCurrentProfile, getSettings, getSoldAccounts, getSoldAccountsPage } from "@/lib/data";
 import { gameSalesSummary, getProfit, isPaidSale, salesBySource } from "@/lib/metrics";
+import { canonicalSaleSource } from "@/lib/sale-sources";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
@@ -131,7 +132,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
             },
             { key: "employee", header: "Sold by", cell: (row) => row.employee?.name ?? row.employee_id, searchValue: (row) => row.employee?.name ?? row.employee_id },
             { key: "amount", header: "Amount", cell: (row) => money(row.sold_amount, settings.currency) },
-            { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
+            { key: "source", header: "Source", cell: (row) => canonicalSaleSource(row.sold_source_website), searchValue: (row) => canonicalSaleSource(row.sold_source_website) },
             { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
             ...(canManageSales
               ? [{
@@ -242,7 +243,7 @@ export default async function SoldAccountsPage({ searchParams }: { searchParams?
           ...(canViewProfit
             ? [{ key: "profit", header: "Profit", cell: (row: SoldRow) => isPaidSale(row) ? money(getProfit(row), settings.currency) : "Waiting payment" } as const]
             : []),
-          { key: "source", header: "Source", cell: (row) => row.sold_source_website ?? "-", searchValue: (row) => row.sold_source_website ?? "" },
+          { key: "source", header: "Source", cell: (row) => canonicalSaleSource(row.sold_source_website), searchValue: (row) => canonicalSaleSource(row.sold_source_website) },
           { key: "payment", header: "Payment", cell: (row) => <StatusBadge value={row.payment_status} />, searchValue: (row) => row.payment_status },
           { key: "date", header: "Sold date", cell: (row) => formatDate(row.sold_date) },
           { key: "paidDate", header: "Paid date", cell: (row) => row.payment_received_date ? formatDate(row.payment_received_date) : "-" },
