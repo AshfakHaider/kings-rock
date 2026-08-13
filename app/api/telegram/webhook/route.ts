@@ -129,7 +129,7 @@ const DEFAULT_SETTINGS_PAYLOAD = {
   business_name: "Kings Rock",
   currency: "USD",
   game_categories: ["Mobile Legends", "Clash of Clans"],
-  sale_source_websites: ["Facebook", "PlayerAuctions", "G2G", "Discord"],
+  sale_source_websites: ["PlayerAuctions", "G2G", "FunPay", "Eldorado", "Igitems", "U7BUY"],
   expense_categories: ["gmail_purchase", "ads", "website_fee", "employee_payment", "scam_account", "refund_account", "other"],
   employee_permissions: {
     can_view_profit: false,

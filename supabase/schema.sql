@@ -158,7 +158,7 @@ create table public.settings (
   business_name text not null default 'Game Account Manager',
   currency text not null default 'USD',
   game_categories text[] not null default array['Mobile Legends', 'Clash of Clans'],
-  sale_source_websites text[] not null default array['Facebook', 'PlayerAuctions', 'G2G', 'Discord'],
+  sale_source_websites text[] not null default array['PlayerAuctions', 'G2G', 'FunPay', 'Eldorado', 'Igitems', 'U7BUY'],
   expense_categories text[] not null default array['gmail_purchase', 'ads', 'website_fee', 'employee_payment', 'scam_account', 'refund_account', 'other'],
   employee_permissions jsonb not null default '{"can_view_profit": false, "can_view_buying_price": false}'::jsonb,
   created_at timestamptz not null default now(),

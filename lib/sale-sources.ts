@@ -14,6 +14,7 @@ const SOURCE_ALIASES: Record<string, string> = {
   playerauctions: "PlayerAuctions",
   u7buy: "U7BUY"
 };
+const HIDDEN_SOURCE_OPTION_KEYS = new Set(["facebook", "discord"]);
 
 export type SourceSummaryRow = {
   source: string;
@@ -54,7 +55,9 @@ export function uniqueSaleSourceOptions(values: Array<string | null | undefined>
   for (const value of values) {
     const source = canonicalSaleSource(value);
     if (source === "Unknown") continue;
-    options.set(canonicalSaleSourceKey(source), source);
+    const key = canonicalSaleSourceKey(source);
+    if (HIDDEN_SOURCE_OPTION_KEYS.has(key)) continue;
+    options.set(key, source);
   }
 
   return Array.from(options.values()).sort((a, b) => a.localeCompare(b));
