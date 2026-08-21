@@ -63,6 +63,13 @@ type SettingsRow = {
   employee_permissions?: Record<string, unknown> | null;
 };
 
+type TelegramStockSourceMessageKind = "title" | "selling_price" | "private_note" | "image" | "other";
+
+type TelegramStockSourceMessage = {
+  kind: TelegramStockSourceMessageKind;
+  messageId: number;
+};
+
 type TelegramStockDraft = {
   id: string;
   accountTitle?: string;
@@ -78,6 +85,9 @@ type TelegramStockDraft = {
   previewMessageId?: number;
   secretCode?: string | null;
   sellingPrice?: number;
+  sourceChatId?: string;
+  sourceChatTitle?: string;
+  sourceMessages?: TelegramStockSourceMessage[];
   stage: "collecting" | "awaiting_buying_price" | "ready_for_approval";
   updatedAt: string;
   userId: string;
@@ -101,6 +111,7 @@ type TelegramGroupStockQueueItem = {
   sourceChatId: string;
   sourceChatTitle?: string;
   sourceMessageId?: number;
+  sourceMessages?: TelegramStockSourceMessage[];
   status: "pending";
   updatedAt: string;
 };
@@ -121,6 +132,7 @@ type TelegramGroupStockBlock = {
   sourceChatId: string;
   sourceChatTitle?: string;
   sourceMessageId?: number;
+  sourceMessages?: TelegramStockSourceMessage[];
   texts: string[];
   updatedAt: string;
 };
@@ -372,6 +384,7 @@ function mergeGroupBlock(existingBlock: TelegramGroupStockBlock, block: Telegram
     ...block,
     createdAt: existingBlock.createdAt,
     imageFileIds: [...new Set([...existingBlock.imageFileIds, ...block.imageFileIds])].slice(0, 15),
+    sourceMessages: mergeSourceMessages(existingBlock.sourceMessages, block.sourceMessages),
     texts: [...new Set([...existingBlock.texts, ...block.texts])],
     updatedAt: block.updatedAt
   };
@@ -635,6 +648,7 @@ async function queueGroupBlock(block: TelegramGroupStockBlock, notify = true) {
     sourceChatId: block.sourceChatId,
     sourceChatTitle: block.sourceChatTitle,
     sourceMessageId: block.sourceMessageId,
+    sourceMessages: mergeSourceMessages(duplicateQueueItem?.sourceMessages, block.sourceMessages),
     status: "pending",
     updatedAt: now
   };
@@ -785,6 +799,42 @@ function getImageFileIds(message: TelegramMessage) {
   }
 
   return ids;
+}
+
+function mergeSourceMessages(
+  ...messageLists: Array<TelegramStockSourceMessage[] | TelegramStockSourceMessage | null | undefined>
+) {
+  const messages = new Map<number, TelegramStockSourceMessage>();
+
+  for (const list of messageLists) {
+    const values = Array.isArray(list) ? list : list ? [list] : [];
+    for (const message of values) {
+      if (!Number.isFinite(message.messageId)) continue;
+      messages.set(message.messageId, message);
+    }
+  }
+
+  return [...messages.values()];
+}
+
+function sourceMessageFromTelegramMessage(
+  message: TelegramMessage,
+  text: string,
+  imageFileIds = getImageFileIds(message)
+): TelegramStockSourceMessage | null {
+  if (!message.message_id) return null;
+
+  const trimmedText = text.trim();
+  let kind: TelegramStockSourceMessageKind = imageFileIds.length ? "image" : "other";
+
+  if (trimmedText) {
+    if (extractSecretCode(trimmedText)) kind = "title";
+    else if (looksLikePrivateNote(trimmedText)) kind = "private_note";
+    else if (parseSellingPriceFromAccountText(trimmedText) !== null || parseMoney(trimmedText) !== null) kind = "selling_price";
+    else kind = "other";
+  }
+
+  return { kind, messageId: message.message_id };
 }
 
 function parseMoney(value: string) {
@@ -1311,6 +1361,109 @@ async function notifyAllowedUsersStockAdded(
   );
 }
 
+function isMissingTelegramSourcesTableError(error: { code?: string; message?: string }) {
+  const message = error.message ?? "";
+  return error.code === "42P01" || message.includes("telegram_stock_sources") || message.includes("schema cache");
+}
+
+async function saveTelegramStockSources(stockAccountId: string, draft: TelegramStockDraft) {
+  const sourceChatId = draft.sourceChatId ?? draft.chatId;
+  const sourceMessages = mergeSourceMessages(draft.sourceMessages);
+  if (!sourceChatId || !sourceMessages.length) return;
+
+  const supabase = createAdminClient();
+  const rows = sourceMessages.map((sourceMessage) => ({
+    stock_account_id: stockAccountId,
+    chat_id: String(sourceChatId),
+    message_id: sourceMessage.messageId,
+    message_kind: sourceMessage.kind,
+    source_chat_title: draft.sourceChatTitle ?? null
+  }));
+
+  const { error } = await supabase
+    .from("telegram_stock_sources")
+    .upsert(rows, { onConflict: "chat_id,message_id" });
+
+  if (error && !isMissingTelegramSourcesTableError(error)) {
+    console.error("Could not save Telegram stock source mapping:", error.message);
+  }
+}
+
+async function updateStockFromEditedTelegramMessage(message: TelegramMessage, text: string) {
+  const chatId = message.chat?.id;
+  const messageId = message.message_id;
+  if (!chatId || !messageId || !text.trim()) return false;
+
+  const supabase = createAdminClient();
+  const { data: source, error: sourceError } = await supabase
+    .from("telegram_stock_sources")
+    .select("stock_account_id,message_kind,source_chat_title")
+    .eq("chat_id", String(chatId))
+    .eq("message_id", messageId)
+    .limit(1)
+    .maybeSingle<{ stock_account_id: string; message_kind: TelegramStockSourceMessageKind; source_chat_title: string | null }>();
+
+  if (sourceError) {
+    if (isMissingTelegramSourcesTableError(sourceError)) return false;
+    throw new Error(sourceError.message);
+  }
+
+  if (!source) return false;
+
+  const settingsCategories = await listGameCategories();
+  const trimmedText = text.trim();
+  const updates: { account_title?: string; game_name?: string; notes?: string; secret_code?: string | null; selling_price?: number } = {};
+
+  if (source.message_kind === "title" || extractSecretCode(trimmedText)) {
+    const parsed = parseAccountText(trimmedText, settingsCategories);
+    updates.account_title = parsed.accountTitle;
+    updates.game_name = await ensureGameCategory(parsed.gameName);
+    updates.secret_code = parsed.secretCode;
+
+    const inlineSellingPrice = parseSellingPriceFromAccountText(trimmedText);
+    if (inlineSellingPrice !== null) updates.selling_price = inlineSellingPrice;
+  } else if (source.message_kind === "selling_price") {
+    const sellingPrice = parseSellingPriceFromAccountText(trimmedText) ?? parseMoney(trimmedText);
+    if (sellingPrice === null) return false;
+    updates.selling_price = sellingPrice;
+  } else if (source.message_kind === "private_note") {
+    updates.notes = trimmedText;
+  } else {
+    const sellingPrice = parseSellingPriceFromAccountText(trimmedText) ?? parseMoney(trimmedText);
+    if (sellingPrice !== null) updates.selling_price = sellingPrice;
+  }
+
+  if (!Object.keys(updates).length) return false;
+
+  const { data: updated, error: updateError } = await supabase
+    .from("stock_accounts")
+    .update(updates)
+    .eq("id", source.stock_account_id)
+    .neq("status", "sold")
+    .select("id,secret_code,account_title,selling_price")
+    .maybeSingle<{ id: string; secret_code: string | null; account_title: string; selling_price: number | null }>();
+
+  if (updateError) throw new Error(updateError.message);
+  if (!updated) return false;
+
+  revalidatePath("/stock-accounts");
+  revalidatePath(`/stock-accounts/${updated.id}`);
+  revalidatePath("/");
+
+  const lines = [
+    "Stock account updated from edited Telegram message.",
+    updated.secret_code ? `Code: ${updated.secret_code}` : null,
+    `Title: ${updated.account_title}`,
+    typeof updated.selling_price === "number" ? `Selling: $${updated.selling_price}` : "Selling: not set",
+    source.source_chat_title ? `Source: ${source.source_chat_title}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await Promise.all([...getAllowedUserIds()].map((allowedUserId) => sendTelegramMessage(allowedUserId, lines)));
+  return true;
+}
+
 async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPrice = 0) {
   if (!draft.accountTitle) throw new Error("Account title is missing.");
   if (!draft.imageFileIds.length) throw new Error("At least one account image is required.");
@@ -1340,6 +1493,8 @@ async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPric
 
   if (error) throw new Error(error.message);
 
+  await saveTelegramStockSources(data.id, draft);
+
   revalidatePath("/stock-accounts");
   revalidatePath(`/stock-accounts/${data.id}`);
   revalidatePath("/");
@@ -1366,6 +1521,9 @@ async function createStockAccountFromGroupQueueItem(item: TelegramGroupStockQueu
     note: item.note,
     secretCode: item.secretCode,
     sellingPrice: item.sellingPrice,
+    sourceChatId: item.sourceChatId,
+    sourceChatTitle: item.sourceChatTitle,
+    sourceMessages: mergeSourceMessages(item.sourceMessages, item.sourceMessageId ? { kind: "other", messageId: item.sourceMessageId } : null),
     stage: "ready_for_approval",
     updatedAt: new Date().toISOString(),
     userId
@@ -1447,6 +1605,7 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
       sourceChatId: String(sourceChatId),
       sourceChatTitle: message.chat?.title ?? message.chat?.username,
       sourceMessageId: message.message_id,
+      sourceMessages: [],
       texts: [],
       updatedAt: now
     });
@@ -1458,6 +1617,7 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
       ...existingBlock,
       imageFileIds,
       sourceMessageId: existingBlock.sourceMessageId ?? message.message_id,
+      sourceMessages: mergeSourceMessages(sourceMessageFromTelegramMessage(message, text, imageFileIds)),
       texts: text ? [text] : [],
       updatedAt: now
     });
@@ -1471,6 +1631,7 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
       sourceChatId: String(sourceChatId),
       sourceChatTitle: message.chat?.title ?? message.chat?.username,
       sourceMessageId: message.message_id,
+      sourceMessages: mergeSourceMessages(sourceMessageFromTelegramMessage(message, text, imageFileIds)),
       texts: text ? [text] : [],
       updatedAt: now
     });
@@ -1487,6 +1648,7 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
     await saveGroupQueueItem({
       ...existingItem,
       imageFileIds: [...new Set([...existingItem.imageFileIds, ...imageFileIds])].slice(0, 15),
+      sourceMessages: mergeSourceMessages(existingItem.sourceMessages, sourceMessageFromTelegramMessage(message, text, imageFileIds)),
       updatedAt: now
     });
     return true;
@@ -1521,6 +1683,7 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
     sourceChatId: String(sourceChatId),
     sourceChatTitle: message.chat?.title ?? message.chat?.username,
     sourceMessageId: message.message_id,
+    sourceMessages: mergeSourceMessages(duplicateQueueItem?.sourceMessages, sourceMessageFromTelegramMessage(message, text, imageFileIds)),
     status: "pending",
     updatedAt: now
   };
@@ -1745,6 +1908,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
       previewMessageId: existingDraft?.previewMessageId,
       secretCode: parsed?.secretCode ?? existingDraft?.secretCode,
       sellingPrice: existingDraft?.sellingPrice,
+      sourceMessages: mergeSourceMessages(existingDraft?.sourceMessages, sourceMessageFromTelegramMessage(message, text, imageFileIds)),
       stage: "collecting",
       updatedAt: now,
       userId
@@ -1759,6 +1923,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
       let draft: TelegramStockDraft = {
         ...existingDraft,
         sellingPrice,
+        sourceMessages: mergeSourceMessages(existingDraft.sourceMessages, sourceMessageFromTelegramMessage(message, text, imageFileIds)),
         updatedAt: now
       };
       return saveOrAutoAddDraft(chatId, key, draft);
@@ -1771,6 +1936,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
     let draft: TelegramStockDraft = {
       ...existingDraft,
       note,
+      sourceMessages: mergeSourceMessages(existingDraft.sourceMessages, sourceMessageFromTelegramMessage(message, text, imageFileIds)),
       updatedAt: now
     };
     return saveOrAutoAddDraft(chatId, key, draft);
@@ -1818,6 +1984,9 @@ async function createDraftFromGroupQueueItem(chatId: number | string, userId: st
     note: item.note,
     secretCode: item.secretCode,
     sellingPrice: item.sellingPrice,
+    sourceChatId: item.sourceChatId,
+    sourceChatTitle: item.sourceChatTitle,
+    sourceMessages: mergeSourceMessages(item.sourceMessages, item.sourceMessageId ? { kind: "other", messageId: item.sourceMessageId } : null),
     stage: "collecting",
     updatedAt: now,
     userId
@@ -2148,6 +2317,21 @@ export async function POST(request: Request) {
       await sendTelegramMessage(chatId, "Kings Rock bot is missing Supabase server environment variables.");
     }
     return jsonOk({ handled: true });
+  }
+
+  if (update.edited_message && message) {
+    try {
+      const updated = await updateStockFromEditedTelegramMessage(message, text);
+      return jsonOk({ edited: true, updated });
+    } catch (error) {
+      if (!message || !isGroupChat(message)) {
+        await sendTelegramMessage(
+          chatId,
+          error instanceof Error ? `Could not update edited stock account: ${error.message}` : "Could not update edited stock account."
+        );
+      }
+      return jsonOk({ edited: true, updated: false });
+    }
   }
 
   if (message && isGroupChat(message)) {
