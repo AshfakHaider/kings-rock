@@ -10,12 +10,21 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { assignableEmployeeRolesFor } from "@/lib/security/employee-role-policy";
+import type { Role } from "@/lib/types";
 
-export function EmployeeModal() {
+const roleLabels: Record<Role, string> = {
+  employee: "Employee",
+  manager: "Manager",
+  admin: "Admin"
+};
+
+export function EmployeeModal({ currentRole }: { currentRole: Role }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
+  const assignableRoles = assignableEmployeeRolesFor(currentRole);
 
   function submit(formData: FormData) {
     startTransition(async () => {
@@ -82,9 +91,11 @@ export function EmployeeModal() {
               <div className="space-y-2">
                 <Label htmlFor="employee_role">Role</Label>
                 <Select id="employee_role" name="role" defaultValue="employee">
-                  <option value="employee">Employee</option>
-                  <option value="manager">Manager</option>
-                  <option value="admin">Admin</option>
+                  {assignableRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {roleLabels[role]}
+                    </option>
+                  ))}
                 </Select>
               </div>
 

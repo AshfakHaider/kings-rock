@@ -48,7 +48,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: P
       <PageHeader
         title="Employees"
         description="Manage staff, permissions, performance, advances, and sale history."
-        action={canManageEmployees ? <EmployeeModal /> : null}
+        action={canManageEmployees ? <EmployeeModal currentRole={currentProfile.role} /> : null}
       />
       <ResponsiveTable
         rows={rows}

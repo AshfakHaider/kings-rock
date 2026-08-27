@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Download, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,15 +32,47 @@ function wait(ms: number) {
 
 export function StockImageGallery({
   images,
-  title
+  title,
+  refreshUrl
 }: {
   images: string[];
   title: string;
+  refreshUrl?: string;
 }) {
+  const [imageUrls, setImageUrls] = useState(images);
   const [activeIndex, setActiveIndex] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const activeImage = images[activeIndex];
+  const [refreshing, setRefreshing] = useState(false);
+  const activeImage = imageUrls[activeIndex];
+
+  useEffect(() => {
+    setImageUrls(images);
+    setActiveIndex(0);
+  }, [images]);
+
+  async function refreshSignedUrls() {
+    if (!refreshUrl || refreshing) return imageUrls;
+
+    setRefreshing(true);
+    try {
+      const response = await fetch(refreshUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("Image refresh failed.");
+      const payload = (await response.json()) as { images?: string[] };
+      const nextImages = payload.images?.filter(Boolean) ?? [];
+      if (nextImages.length) {
+        setImageUrls(nextImages);
+        setActiveIndex((index) => Math.min(index, nextImages.length - 1));
+        return nextImages;
+      }
+    } catch {
+      setNotice("Image links expired. Refresh the page if images do not load.");
+    } finally {
+      setRefreshing(false);
+    }
+
+    return imageUrls;
+  }
 
   async function downloadAllImages() {
     if (downloading) return;
@@ -49,7 +81,8 @@ export function StockImageGallery({
     setNotice(null);
 
     try {
-      for (const [index, image] of images.entries()) {
+      const freshImages = await refreshSignedUrls();
+      for (const [index, image] of freshImages.entries()) {
         const response = await fetch(image);
         if (!response.ok) throw new Error("Image download failed.");
         const blob = await response.blob();
@@ -57,7 +90,7 @@ export function StockImageGallery({
         downloadBlob(blob, `${baseName}-${String(index + 1).padStart(2, "0")}.${extension}`);
         await wait(150);
       }
-      setNotice(`Started ${images.length} image downloads. Your browser may ask to allow multiple downloads.`);
+      setNotice(`Started ${freshImages.length} image downloads. Your browser may ask to allow multiple downloads.`);
     } catch {
       setNotice("Could not download all images. Please try again or download images one by one.");
     } finally {
@@ -94,13 +127,14 @@ export function StockImageGallery({
           height={675}
           priority={activeIndex === 0}
           unoptimized
+          onError={() => void refreshSignedUrls()}
           className="h-full w-full object-contain"
         />
       </div>
 
-      {images.length > 1 ? (
+      {imageUrls.length > 1 ? (
         <div className="grid grid-cols-4 gap-2 border-t p-3 sm:grid-cols-6 lg:grid-cols-5">
-          {images.slice(0, 15).map((image, index) => (
+          {imageUrls.slice(0, 15).map((image, index) => (
             <button
               key={`${image}-${index}`}
               type="button"
@@ -118,6 +152,7 @@ export function StockImageGallery({
                 width={160}
                 height={160}
                 unoptimized
+                onError={() => void refreshSignedUrls()}
                 className="h-full w-full object-cover"
               />
             </button>

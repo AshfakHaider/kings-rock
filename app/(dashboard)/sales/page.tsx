@@ -7,11 +7,13 @@ import { assignedEmployeeNames, DEFAULT_PAGE_SIZE, getCurrentProfile, getProfile
 import { stockDisplayTitle } from "@/lib/stock-title";
 import { formatDate, money } from "@/lib/utils";
 
-function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null }>(account: T) {
+function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null; image_path?: string | null; image_paths?: string[] | null }>(account: T) {
   return {
     ...account,
     image_url: null,
-    image_urls: []
+    image_urls: [],
+    image_path: null,
+    image_paths: []
   };
 }
 

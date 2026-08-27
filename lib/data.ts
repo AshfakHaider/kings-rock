@@ -53,19 +53,19 @@ import { normalizeCurrency } from "@/lib/utils";
 
 export const DEFAULT_PAGE_SIZE = 30;
 const PROFILE_SELECT = "id,auth_user_id,name,phone,email,role,status,join_date,notes,created_at";
-const SETTINGS_SELECT = "id,business_name,currency,game_categories,sale_source_websites,expense_categories,employee_permissions";
+const SETTINGS_SELECT = "id,business_name,currency,game_categories,sale_source_websites,expense_categories";
 const SOLD_ACCOUNT_SELECT =
   "id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at,stock_account:stock_accounts(id,game_name,account_title,buying_price,selling_price,secret_code), employee:profiles(id,name,email)";
 const ADVANCE_SELECT = "id,employee_id,amount_given,date_given,purpose,payment_method,status,notes,created_by,created_at,employee:profiles(id,name,email)";
 const ADVANCE_TRANSACTION_SELECT = "id,advance_id,employee_id,type,amount,stock_account_id,transaction_date,notes,created_by,created_at";
 const EXPENSE_SELECT = "id,title,category,amount,expense_date,paid_by,notes,created_at,payer:profiles!expenses_paid_by_fkey(id,name,email)";
 const STOCK_ACCOUNT_DETAIL_SELECT =
-  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,image_path,image_paths,secret_code,purchase_date,status,assigned_employee_id,gmail_id,created_by,created_at,updated_at,zeusx_enabled,zeusx_status,zeusx_category,zeusx_game,zeusx_server,zeusx_delivery_method,zeusx_delivery_days,zeusx_delivery_hours,zeusx_description,zeusx_tags,zeusx_listing_url,zeusx_posted_at,zeusx_error,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
 const DAILY_TASK_SELECT = "id,title,description,task_date,created_by,created_at,creator:profiles!daily_tasks_created_by_fkey(id,name,email)";
 const DAILY_TASK_COMPLETION_SELECT = "id,task_id,employee_id,screenshot_url,screenshot_urls,completed_at,employee:profiles(id,name,email),task:daily_tasks(id,title,task_date)";
 const ACTIVITY_LOG_SELECT = "id,user_id,action,table_name,record_id,old_data,new_data,created_at,user:profiles(id,name,email)";
 const STOCK_ACCOUNT_LIST_SELECT =
-  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_path,image_paths,secret_code,purchase_date,status,assigned_employee_id,gmail_id,created_by,created_at,updated_at,zeusx_enabled,zeusx_status,zeusx_category,zeusx_game,zeusx_server,zeusx_delivery_method,zeusx_delivery_days,zeusx_delivery_hours,zeusx_description,zeusx_tags,zeusx_listing_url,zeusx_posted_at,zeusx_error,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
 const STOCK_ASSIGNMENT_SELECT = "id,stock_account_id,employee_id,assigned_by,created_at";
 
 type PagedResult<T> = {
@@ -156,7 +156,6 @@ function stockMatchesSearch(account: StockAccount, term: string) {
     account.purchase_source,
     account.secret_code,
     account.status,
-    account.notes,
     account.assigned_employee?.name,
     account.assigned_employee?.email,
     assignmentText
@@ -198,8 +197,40 @@ export function isAccountAssignedTo(account: Pick<StockAccount, "assigned_employ
   return account.assigned_employee_id === employeeId || Boolean(account.assignments?.some((assignment) => assignment.employee_id === employeeId));
 }
 
+export function canViewStockPrivateData(profile: Pick<Profile, "role" | "status"> | null | undefined) {
+  return profile?.status === "active" && (profile.role === "admin" || profile.role === "manager");
+}
+
 function hasAnyAssignment(account: Pick<StockAccount, "assigned_employee_id" | "assignments">) {
   return Boolean(account.assigned_employee_id || account.assignments?.length);
+}
+
+async function getStockAccountPrivateNotes(stockAccountId: string, profile: Profile) {
+  if (!canViewStockPrivateData(profile)) return null;
+
+  if (!hasSupabaseEnv()) {
+    const account = (await getDemoStockAccounts()).find((item) => item.id === stockAccountId);
+    return account?.notes ?? null;
+  }
+
+  if (hasSupabaseAdminEnv()) {
+    const { data, error } = await createAdminClient()
+      .from("stock_accounts")
+      .select("notes")
+      .eq("id", stockAccountId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return (data as Pick<StockAccount, "notes"> | null)?.notes ?? null;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("get_stock_account_private_notes", {
+    p_stock_account_id: stockAccountId
+  });
+
+  if (error) throw new Error(error.message);
+  return typeof data === "string" ? data : null;
 }
 
 function withLegacyAssignment(account: StockAccount): StockAccount {
@@ -396,7 +427,11 @@ function normalizeSettings(settings: Settings): Settings {
   return {
     ...settings,
     currency: normalizeCurrency(settings.currency),
-    sale_source_websites: uniqueSaleSourceOptions(settings.sale_source_websites ?? [])
+    sale_source_websites: uniqueSaleSourceOptions(settings.sale_source_websites ?? []),
+    employee_permissions: {
+      can_view_profit: Boolean(settings.employee_permissions?.can_view_profit),
+      can_view_buying_price: Boolean(settings.employee_permissions?.can_view_buying_price)
+    }
   };
 }
 
@@ -444,7 +479,7 @@ export async function getSettings(): Promise<Settings> {
   if (!hasSupabaseEnv()) return normalizeSettings(demoSettings);
   const supabase = await createClient();
   const { data } = await supabase.from("settings").select(SETTINGS_SELECT).limit(1).single();
-  return normalizeSettings((data as Settings) ?? demoSettings);
+  return normalizeSettings({ ...demoSettings, ...(data ?? {}) } as Settings);
 }
 
 function normalizeDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnapshot {
@@ -762,7 +797,9 @@ export async function getStockAccounts(): Promise<StockAccount[]> {
     return hydrateStockAssignments(accounts.map((account) => ({
       ...account,
       image_url: null,
-      image_urls: []
+      image_urls: [],
+      image_path: null,
+      image_paths: []
     })));
   }
   const supabase = await createClient();
@@ -925,7 +962,13 @@ export async function getStockAccount(id: string): Promise<StockAccount | null> 
   if (!hasSupabaseEnv()) {
     const accounts = await getDemoStockAccounts();
     const account = accounts.find((account) => account.id === id) ?? null;
-    return account ? (await hydrateStockAssignments([account]))[0] : null;
+    if (!account) return null;
+    const profile = await getCurrentProfile();
+    const hydratedAccount = (await hydrateStockAssignments([account]))[0];
+    return {
+      ...hydratedAccount,
+      notes: await getStockAccountPrivateNotes(id, profile)
+    };
   }
 
   const supabase = await createClient();
@@ -936,7 +979,14 @@ export async function getStockAccount(id: string): Promise<StockAccount | null> 
     .maybeSingle();
 
   const account = (data as StockAccount | null) ?? null;
-  return account ? (await hydrateStockAssignments([account]))[0] : null;
+  if (!account) return null;
+
+  const hydratedAccount = (await hydrateStockAssignments([account]))[0];
+  const profile = await getCurrentProfile();
+  return {
+    ...hydratedAccount,
+    notes: await getStockAccountPrivateNotes(account.id, profile)
+  };
 }
 
 export async function getStockAccountCredential(
@@ -944,14 +994,7 @@ export async function getStockAccountCredential(
   profile?: Profile
 ): Promise<StockAccountCredential | null> {
   const currentProfile = profile ?? (await getCurrentProfile());
-  const isAssigned = Boolean(account.assigned_employee_id);
-  const canViewCredential =
-    (isAssigned || hasAnyAssignment(account)) &&
-    (currentProfile.role === "admin" ||
-      currentProfile.role === "manager" ||
-      isAccountAssignedTo(account, currentProfile.id));
-
-  if (!canViewCredential) return null;
+  if (!canViewStockPrivateData(currentProfile)) return null;
 
   if (!hasSupabaseEnv()) {
     return getDemoStockAccountCredential(account.id);
