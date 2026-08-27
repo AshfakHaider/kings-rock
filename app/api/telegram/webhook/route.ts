@@ -1955,7 +1955,6 @@ async function startStockDraft(chatId: number | string, userId: string) {
   let draft: TelegramStockDraft = existingDraft ?? {
     id: randomUUID(),
     chatId: String(chatId),
-    buyingPrice: 0,
     createdAt: now,
     buyingPrice: 0,
     imageFileIds: [],
