@@ -3,7 +3,7 @@ import bundleAnalyzer from "@next/bundle-analyzer";
 
 const nextConfig: NextConfig = {
   typedRoutes: false,
-  ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
+  ...(process.env.NEXT_OUTPUT_STANDALONE === "true" ? { output: "standalone" as const } : {}),
   images: {
     remotePatterns: [
       {

@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/prepare-standalone.cjs",
+    "build": "next build --webpack && node scripts/prepare-standalone.cjs",
+    "build:render": "NEXT_OUTPUT_STANDALONE=true npm run build",
     "analyze": "ANALYZE=true next build",
     "start": "next start",
     "start:render": "HOSTNAME=0.0.0.0 PORT=${PORT:-10000} node .next/standalone/server.js",
