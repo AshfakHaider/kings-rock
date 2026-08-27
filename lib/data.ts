@@ -60,12 +60,12 @@ const ADVANCE_SELECT = "id,employee_id,amount_given,date_given,purpose,payment_m
 const ADVANCE_TRANSACTION_SELECT = "id,advance_id,employee_id,type,amount,stock_account_id,transaction_date,notes,created_by,created_at";
 const EXPENSE_SELECT = "id,title,category,amount,expense_date,paid_by,notes,created_at,payer:profiles!expenses_paid_by_fkey(id,name,email)";
 const STOCK_ACCOUNT_DETAIL_SELECT =
-  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,image_path,image_paths,secret_code,purchase_date,status,assigned_employee_id,gmail_id,created_by,created_at,updated_at,zeusx_enabled,zeusx_status,zeusx_category,zeusx_game,zeusx_server,zeusx_delivery_method,zeusx_delivery_days,zeusx_delivery_hours,zeusx_description,zeusx_tags,zeusx_listing_url,zeusx_posted_at,zeusx_error,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,secret_code,purchase_date,status,assigned_employee_id,gmail_id,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
 const DAILY_TASK_SELECT = "id,title,description,task_date,created_by,created_at,creator:profiles!daily_tasks_created_by_fkey(id,name,email)";
 const DAILY_TASK_COMPLETION_SELECT = "id,task_id,employee_id,screenshot_url,screenshot_urls,completed_at,employee:profiles(id,name,email),task:daily_tasks(id,title,task_date)";
 const ACTIVITY_LOG_SELECT = "id,user_id,action,table_name,record_id,old_data,new_data,created_at,user:profiles(id,name,email)";
 const STOCK_ACCOUNT_LIST_SELECT =
-  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_path,image_paths,secret_code,purchase_date,status,assigned_employee_id,gmail_id,created_by,created_at,updated_at,zeusx_enabled,zeusx_status,zeusx_category,zeusx_game,zeusx_server,zeusx_delivery_method,zeusx_delivery_days,zeusx_delivery_hours,zeusx_description,zeusx_tags,zeusx_listing_url,zeusx_posted_at,zeusx_error,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,secret_code,purchase_date,status,assigned_employee_id,gmail_id,created_by,created_at,updated_at,assigned_employee:profiles!stock_accounts_assigned_employee_id_fkey(id,name,email)";
 const STOCK_ASSIGNMENT_SELECT = "id,stock_account_id,employee_id,assigned_by,created_at";
 
 type PagedResult<T> = {
