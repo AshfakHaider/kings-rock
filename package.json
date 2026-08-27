@@ -11,8 +11,10 @@
     "analyze": "ANALYZE=true next build",
     "start": "next start",
     "start:render": "HOSTNAME=0.0.0.0 PORT=${PORT:-10000} node .next/standalone/server.js",
-    "test": "node --test tests/*.test.mjs",
-    "lint": "next lint",
+    "test": "npm run test:legacy && npm run test:unit",
+    "test:legacy": "node --test tests/*.test.mjs",
+    "test:unit": "vitest run",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "live:create-admin": "node scripts/create-live-admin.cjs"
   },
@@ -24,25 +26,39 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.468.0",
-    "next": "^15.1.2",
+    "next": "^16.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.3",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@next/bundle-analyzer": "^16.2.9",
+    "@next/bundle-analyzer": "^16.3.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.17.0",
-    "eslint-config-next": "^15.1.2",
-    "postcss": "^8.4.49",
+    "eslint-config-next": "^16.3.0",
+    "postcss": "^8.5.23",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.23",
+      "sharp": "0.35.3"
+    },
+    "js-yaml": "4.3.1",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
+    "minimatch@10.2.5": {
+      "brace-expansion": "5.0.9"
+    }
   }
 }

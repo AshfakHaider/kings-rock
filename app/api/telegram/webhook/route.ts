@@ -63,6 +63,17 @@ type SettingsRow = {
   employee_permissions?: Record<string, unknown> | null;
 };
 
+type TelegramRuntimeKey =
+  | "telegram_stock_drafts"
+  | "telegram_group_stock_queue"
+  | "telegram_group_queue_edits"
+  | "telegram_group_stock_blocks";
+
+type TelegramRuntimeRow = {
+  key: TelegramRuntimeKey;
+  data: Record<string, unknown> | null;
+};
+
 type TelegramStockDraft = {
   id: string;
   accountTitle?: string;
@@ -139,6 +150,12 @@ const DEFAULT_SETTINGS_PAYLOAD = {
 const TELEGRAM_IMAGE_MAX_DIMENSION = 1600;
 const TELEGRAM_IMAGE_QUALITY = 76;
 const TELEGRAM_GROUP_CLOSE_DELAY_MS = 1500;
+const TELEGRAM_RUNTIME_KEYS = [
+  "telegram_stock_drafts",
+  "telegram_group_stock_queue",
+  "telegram_group_queue_edits",
+  "telegram_group_stock_blocks"
+] as const satisfies readonly TelegramRuntimeKey[];
 
 function jsonOk(extra: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: true, ...extra });
@@ -291,7 +308,7 @@ async function setTelegramCommands() {
         { command: "games", description: "Show saved game names" },
         { command: "draft", description: "Show current stock draft" },
         { command: "reviewmissing", description: "Review missing accounts found in groups" },
-        { command: "addallmissing", description: "Approve complete missing accounts" },
+        { command: "addallmissing", description: "Add complete missing accounts" },
         { command: "cancelstock", description: "Delete current stock draft" }
       ]
     });
@@ -309,39 +326,51 @@ async function getSettings() {
     .maybeSingle<SettingsRow>();
 
   if (error) throw new Error(error.message);
-  return data;
+  if (!data) return null;
+
+  return {
+    ...data,
+    employee_permissions: await getTelegramRuntimePermissions(data.employee_permissions ?? {})
+  };
 }
 
-function getDrafts(settings: SettingsRow | null) {
-  const permissions = settings?.employee_permissions;
-  const drafts = permissions?.telegram_stock_drafts;
-  return drafts && typeof drafts === "object" && !Array.isArray(drafts)
-    ? (drafts as Record<string, TelegramStockDraft>)
+async function getTelegramRuntimePermissions(legacyPermissions: Record<string, unknown>) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("telegram_runtime_state")
+    .select("key,data")
+    .in("key", [...TELEGRAM_RUNTIME_KEYS]);
+
+  if (error) throw new Error(error.message);
+
+  return Object.fromEntries(
+    TELEGRAM_RUNTIME_KEYS.map((key) => {
+      const runtimeRow = (data as TelegramRuntimeRow[] | null)?.find((row) => row.key === key);
+      return [key, runtimeRow?.data ?? legacyPermissions[key] ?? {}];
+    })
+  );
+}
+
+function objectMap<T>(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, T>)
     : {};
 }
 
 function getGroupQueue(settings: SettingsRow | null) {
-  const permissions = settings?.employee_permissions;
-  const queue = permissions?.telegram_group_stock_queue;
-  return queue && typeof queue === "object" && !Array.isArray(queue)
-    ? (queue as Record<string, TelegramGroupStockQueueItem>)
-    : {};
+  return objectMap<TelegramGroupStockQueueItem>(settings?.employee_permissions?.telegram_group_stock_queue);
+}
+
+function getDrafts(settings: SettingsRow | null) {
+  return objectMap<TelegramStockDraft>(settings?.employee_permissions?.telegram_stock_drafts);
 }
 
 function getGroupQueueEdits(settings: SettingsRow | null) {
-  const permissions = settings?.employee_permissions;
-  const edits = permissions?.telegram_group_queue_edits;
-  return edits && typeof edits === "object" && !Array.isArray(edits)
-    ? (edits as Record<string, TelegramGroupQueueEdit>)
-    : {};
+  return objectMap<TelegramGroupQueueEdit>(settings?.employee_permissions?.telegram_group_queue_edits);
 }
 
 function getGroupBlocks(settings: SettingsRow | null) {
-  const permissions = settings?.employee_permissions;
-  const blocks = permissions?.telegram_group_stock_blocks;
-  return blocks && typeof blocks === "object" && !Array.isArray(blocks)
-    ? (blocks as Record<string, TelegramGroupStockBlock>)
-    : {};
+  return objectMap<TelegramGroupStockBlock>(settings?.employee_permissions?.telegram_group_stock_blocks);
 }
 
 function compactGroupQueue(queue: Record<string, TelegramGroupStockQueueItem>) {
@@ -352,6 +381,22 @@ function compactGroupQueue(queue: Record<string, TelegramGroupStockQueueItem>) {
       .slice(0, 120)
       .map((item) => [item.id, item])
   );
+}
+
+async function saveTelegramRuntimeMap(key: TelegramRuntimeKey, data: Record<string, unknown>) {
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("telegram_runtime_state")
+    .upsert(
+      {
+        key,
+        data,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "key" }
+    );
+
+  if (error) throw new Error(error.message);
 }
 
 function draftKey(chatId: number | string, userId: string) {
@@ -403,16 +448,12 @@ function isEmptyShellGroupQueueItem(item: TelegramGroupStockQueueItem) {
 }
 
 async function saveDraft(key: string, draft: TelegramStockDraft | null) {
-  const supabase = createAdminClient();
   const settings = await getSettings();
 
   if (!settings) {
     throw new Error("Settings row was not found. Add settings first from the app.");
   }
 
-  const permissions = {
-    ...(settings.employee_permissions ?? {})
-  };
   const drafts = {
     ...getDrafts(settings)
   };
@@ -423,17 +464,7 @@ async function saveDraft(key: string, draft: TelegramStockDraft | null) {
     delete drafts[key];
   }
 
-  const nextPermissions = {
-    ...permissions,
-    telegram_stock_drafts: drafts
-  };
-
-  const { error } = await supabase
-    .from("settings")
-    .update({ employee_permissions: nextPermissions })
-    .eq("id", settings.id);
-
-  if (error) throw new Error(error.message);
+  await saveTelegramRuntimeMap("telegram_stock_drafts", drafts);
 }
 
 async function getDraft(key: string) {
@@ -441,16 +472,12 @@ async function getDraft(key: string) {
 }
 
 async function saveGroupQueueItem(item: TelegramGroupStockQueueItem | null) {
-  const supabase = createAdminClient();
   const settings = await getSettings();
 
   if (!settings) {
     throw new Error("Settings row was not found. Add settings first from the app.");
   }
 
-  const permissions = {
-    ...(settings.employee_permissions ?? {})
-  };
   const queue = {
     ...getGroupQueue(settings)
   };
@@ -459,60 +486,31 @@ async function saveGroupQueueItem(item: TelegramGroupStockQueueItem | null) {
     queue[item.id] = item;
   }
 
-  const nextQueue = item ? compactGroupQueue(queue) : queue;
-  const nextPermissions = {
-    ...permissions,
-    telegram_group_stock_queue: nextQueue
-  };
-
-  const { error } = await supabase
-    .from("settings")
-    .update({ employee_permissions: nextPermissions })
-    .eq("id", settings.id);
-
-  if (error) throw new Error(error.message);
+  await saveTelegramRuntimeMap("telegram_group_stock_queue", item ? compactGroupQueue(queue) : queue);
 }
 
 async function deleteGroupQueueItem(itemId: string) {
-  const supabase = createAdminClient();
   const settings = await getSettings();
 
   if (!settings) {
     throw new Error("Settings row was not found. Add settings first from the app.");
   }
 
-  const permissions = {
-    ...(settings.employee_permissions ?? {})
-  };
   const queue = {
     ...getGroupQueue(settings)
   };
   delete queue[itemId];
 
-  const { error } = await supabase
-    .from("settings")
-    .update({
-      employee_permissions: {
-        ...permissions,
-        telegram_group_stock_queue: queue
-      }
-    })
-    .eq("id", settings.id);
-
-  if (error) throw new Error(error.message);
+  await saveTelegramRuntimeMap("telegram_group_stock_queue", queue);
 }
 
 async function saveGroupQueueEdit(key: string, edit: TelegramGroupQueueEdit | null) {
-  const supabase = createAdminClient();
   const settings = await getSettings();
 
   if (!settings) {
     throw new Error("Settings row was not found. Add settings first from the app.");
   }
 
-  const permissions = {
-    ...(settings.employee_permissions ?? {})
-  };
   const edits = {
     ...getGroupQueueEdits(settings)
   };
@@ -523,17 +521,7 @@ async function saveGroupQueueEdit(key: string, edit: TelegramGroupQueueEdit | nu
     delete edits[key];
   }
 
-  const { error } = await supabase
-    .from("settings")
-    .update({
-      employee_permissions: {
-        ...permissions,
-        telegram_group_queue_edits: edits
-      }
-    })
-    .eq("id", settings.id);
-
-  if (error) throw new Error(error.message);
+  await saveTelegramRuntimeMap("telegram_group_queue_edits", edits);
 }
 
 async function getGroupQueueEdit(key: string) {
@@ -541,16 +529,12 @@ async function getGroupQueueEdit(key: string) {
 }
 
 async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null, mode: "replace" | "merge" = "replace") {
-  const supabase = createAdminClient();
   const settings = await getSettings();
 
   if (!settings) {
     throw new Error("Settings row was not found. Add settings first from the app.");
   }
 
-  const permissions = {
-    ...(settings.employee_permissions ?? {})
-  };
   const blocks = {
     ...getGroupBlocks(settings)
   };
@@ -562,17 +546,7 @@ async function saveGroupBlock(key: string, block: TelegramGroupStockBlock | null
     delete blocks[key];
   }
 
-  const { error } = await supabase
-    .from("settings")
-    .update({
-      employee_permissions: {
-        ...permissions,
-        telegram_group_stock_blocks: blocks
-      }
-    })
-    .eq("id", settings.id);
-
-  if (error) throw new Error(error.message);
+  await saveTelegramRuntimeMap("telegram_group_stock_blocks", blocks);
 }
 
 async function appendGroupBlockFragment(key: string, fragment: TelegramGroupStockBlock) {
@@ -625,6 +599,7 @@ async function queueGroupBlock(block: TelegramGroupStockBlock, notify = true) {
 
   const item: TelegramGroupStockQueueItem = {
     accountTitle: parsedBlock.accountTitle,
+    buyingPrice: 0,
     createdAt: duplicateQueueItem?.createdAt ?? block.createdAt,
     gameName: parsedBlock.gameName,
     id: duplicateQueueItem?.id ?? randomUUID(),
@@ -638,6 +613,30 @@ async function queueGroupBlock(block: TelegramGroupStockBlock, notify = true) {
     status: "pending",
     updatedAt: now
   };
+
+  if (missingGroupQueueFields(item).length === 0) {
+    try {
+      const created = await createStockAccountFromGroupQueueItem(item, String(block.sourceChatId), "group-auto");
+      if (duplicateQueueItem) {
+        await deleteGroupQueueItem(duplicateQueueItem.id);
+      }
+      await notifyAllowedUsersStockAdded(created, item.sellingPrice, item.sourceChatTitle);
+      return true;
+    } catch (error) {
+      await saveGroupQueueItem(item);
+      if (notify && !duplicateQueueItem) {
+        await Promise.all(
+          [...getAllowedUserIds()].map((allowedUserId) =>
+            sendTelegramMessage(
+              allowedUserId,
+              error instanceof Error ? `Could not auto-add stock account: ${error.message}` : "Could not auto-add stock account."
+            )
+          )
+        );
+      }
+      return true;
+    }
+  }
 
   await saveGroupQueueItem(item);
   if (notify && !duplicateQueueItem) {
@@ -1004,7 +1003,7 @@ async function optimizeTelegramImage(buffer: Buffer) {
 async function uploadTelegramImages(fileIds: string[]) {
   const token = botToken();
   const supabase = createAdminClient();
-  const urls: string[] = [];
+  const paths: string[] = [];
 
   for (const fileId of fileIds.slice(0, 15)) {
     const file = await callTelegramApi<{ file_path?: string }>("getFile", { file_id: fileId });
@@ -1032,16 +1031,14 @@ async function uploadTelegramImages(fileIds: string[]) {
 
     if (error) throw new Error(`Image upload failed: ${error.message}`);
 
-    const { data } = supabase.storage.from("stock-images").getPublicUrl(storagePath);
-    urls.push(data.publicUrl);
+    paths.push(storagePath);
   }
 
-  return urls;
+  return paths;
 }
 
 function nextDraftStage(draft: TelegramStockDraft): TelegramStockDraft["stage"] {
-  if (typeof draft.buyingPrice === "number") return "ready_for_approval";
-  return "collecting";
+  return missingApprovalFields(draft).length ? "collecting" : "ready_for_approval";
 }
 
 function missingApprovalFields(draft: TelegramStockDraft) {
@@ -1049,7 +1046,6 @@ function missingApprovalFields(draft: TelegramStockDraft) {
   if (!draft.accountTitle) missing.push("title");
   if (!draft.imageFileIds.length) missing.push("image");
   if (!draft.note) missing.push("private note");
-  if (typeof draft.buyingPrice !== "number") missing.push("buying price");
   return missing;
 }
 
@@ -1057,11 +1053,11 @@ function nextDraftInstruction(draft: TelegramStockDraft) {
   const missing = missingApprovalFields(draft);
   const nextMissing = missing[0];
 
-  if (!nextMissing) return "Ready. Tap Approve to add this account to stock.";
+  if (!nextMissing) return "Ready. I will add this account automatically.";
   if (nextMissing === "title") return "Next: forward or send the account title with code, like ML# 1632 ...";
   if (nextMissing === "image") return "Next: forward or upload at least one account image.";
   if (nextMissing === "private note") return "Next: send Gmail/password private note.";
-  return "Next: send buying price, like 10 or $10.";
+  return "Next: send the missing detail.";
 }
 
 function draftPreviewText(draft: TelegramStockDraft) {
@@ -1075,7 +1071,7 @@ function draftPreviewText(draft: TelegramStockDraft) {
     `Images: ${draft.imageFileIds.length}/15`,
     draft.note ? "Private note: saved" : "Private note: missing",
     typeof draft.sellingPrice === "number" ? `Selling price: $${draft.sellingPrice}` : "Selling price: not set",
-    typeof draft.buyingPrice === "number" ? `Buying price: $${draft.buyingPrice}` : "Buying price: missing",
+    "Buying price: $0",
     "",
     missing.length ? `Missing: ${missing.join(", ")}` : null,
     nextDraftInstruction(draft)
@@ -1086,7 +1082,6 @@ function draftPreviewMarkup() {
   return {
     inline_keyboard: [
       [
-        { text: "Approve", callback_data: "stock:approve" },
         { text: "Edit", callback_data: "stock:edit" },
         { text: "Delete", callback_data: "stock:delete" }
       ]
@@ -1110,7 +1105,6 @@ function draftEditMarkup() {
         { text: "Selling price", callback_data: "stock:edit:selling_price" }
       ],
       [
-        { text: "Buying price", callback_data: "stock:edit:buying_price" },
         { text: "Private note", callback_data: "stock:edit:private_note" }
       ],
       [
@@ -1132,12 +1126,12 @@ function groupQueueItemText(item: TelegramGroupStockQueueItem, index?: number, t
     `Images: ${item.imageFileIds.length}/15`,
     item.note ? "Private note: saved" : "Private note: missing",
     typeof item.sellingPrice === "number" ? `Selling price: $${item.sellingPrice}` : "Selling price: not set",
-    typeof item.buyingPrice === "number" ? `Buying price: $${item.buyingPrice}` : "Buying price: missing",
+    "Buying price: $0",
     item.sourceChatTitle ? `Source: ${item.sourceChatTitle}` : null,
     "",
     missing.length
       ? `Missing: ${missing.join(", ")}`
-      : "Ready. Tap Approve to add this account to stock."
+      : "Ready. I will add this account automatically."
   ]
     .filter(Boolean)
     .join("\n");
@@ -1148,7 +1142,6 @@ function missingGroupQueueFields(item: TelegramGroupStockQueueItem) {
   if (!item.accountTitle) missing.push("title");
   if (!item.imageFileIds.length) missing.push("image");
   if (!item.note) missing.push("private note");
-  if (typeof item.buyingPrice !== "number") missing.push("buying price");
   return missing;
 }
 
@@ -1157,12 +1150,11 @@ function groupQueueMarkup(item: TelegramGroupStockQueueItem, completeCount = 0) 
   const isComplete = missingGroupQueueFields(item).length === 0;
   const firstRow = isComplete
     ? [
-        { text: "Approve", callback_data: `group:approve:${itemId}` },
+        { text: "Add now", callback_data: `group:approve:${itemId}` },
         { text: "Edit", callback_data: `group:editmenu:${itemId}` },
         { text: "Skip", callback_data: `group:skip:${itemId}` }
       ]
     : [
-        { text: "Buying price", callback_data: `group:edit:buying_price:${itemId}` },
         { text: "Private note", callback_data: `group:edit:private_note:${itemId}` }
       ];
   const rows = [
@@ -1178,7 +1170,7 @@ function groupQueueMarkup(item: TelegramGroupStockQueueItem, completeCount = 0) 
   ];
 
   if (completeCount > 0) {
-    rows.push([{ text: `Approve complete (${completeCount})`, callback_data: "group:bulk" }]);
+    rows.push([{ text: `Add complete (${completeCount})`, callback_data: "group:bulk" }]);
   }
 
   return {
@@ -1197,6 +1189,47 @@ async function sendOrUpdateDraftPreview(chatId: number | string, draft: Telegram
 
   const sent = await sendTelegramMessage(chatId, text, extra);
   return sent?.message_id ? { ...draft, previewMessageId: sent.message_id } : draft;
+}
+
+async function saveOrAutoAddDraft(chatId: number | string, key: string, draft: TelegramStockDraft) {
+  const readyDraft: TelegramStockDraft = {
+    ...draft,
+    buyingPrice: 0,
+    stage: nextDraftStage({ ...draft, buyingPrice: 0 }),
+    updatedAt: new Date().toISOString()
+  };
+
+  if (missingApprovalFields(readyDraft).length) {
+    const previewDraft = await sendOrUpdateDraftPreview(chatId, readyDraft);
+    await saveDraft(key, previewDraft);
+    return true;
+  }
+
+  try {
+    const created = await createStockAccountFromDraft(readyDraft, 0);
+    await saveDraft(key, null);
+    if (readyDraft.groupQueueItemId) {
+      await deleteGroupQueueItem(readyDraft.groupQueueItemId);
+    }
+
+    const successMessage = stockAddedMessage(created, readyDraft.sellingPrice);
+    if (readyDraft.previewMessageId) {
+      const edited = await editTelegramMessageText(chatId, readyDraft.previewMessageId, successMessage);
+      if (!edited) await sendTelegramMessage(chatId, successMessage);
+    } else {
+      await sendTelegramMessage(chatId, successMessage);
+    }
+
+    return true;
+  } catch (error) {
+    const previewDraft = await sendOrUpdateDraftPreview(chatId, readyDraft);
+    await saveDraft(key, previewDraft);
+    await sendTelegramMessage(
+      chatId,
+      error instanceof Error ? `Could not add stock account: ${error.message}` : "Could not add stock account."
+    );
+    return true;
+  }
 }
 
 async function pendingGroupQueueItems() {
@@ -1233,14 +1266,42 @@ async function notifyAllowedUsersAboutGroupItem(item: TelegramGroupStockQueueIte
   );
 }
 
-async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPrice: number) {
+function stockAddedMessage(
+  created: { account_title: string; secret_code: string | null },
+  sellingPrice: number | undefined,
+  sourceChatTitle?: string
+) {
+  return [
+    "Stock account added.",
+    created.secret_code ? `Code: ${created.secret_code}` : null,
+    `Title: ${created.account_title}`,
+    "Buying: $0",
+    typeof sellingPrice === "number" ? `Selling: $${sellingPrice}` : "Selling: not set",
+    sourceChatTitle ? `Source: ${sourceChatTitle}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function notifyAllowedUsersStockAdded(
+  created: { account_title: string; secret_code: string | null },
+  sellingPrice: number | undefined,
+  sourceChatTitle?: string
+) {
+  const allowedUserIds = [...getAllowedUserIds()];
+  const message = stockAddedMessage(created, sellingPrice, sourceChatTitle);
+
+  await Promise.all(allowedUserIds.map((allowedUserId) => sendTelegramMessage(allowedUserId, message)));
+}
+
+async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPrice = 0) {
   if (!draft.accountTitle) throw new Error("Account title is missing.");
   if (!draft.imageFileIds.length) throw new Error("At least one account image is required.");
 
   const gameName = await ensureGameCategory(draft.gameName ?? inferGameName(draft.secretCode, await listGameCategories()));
   await assertNoDuplicateStockAccount(draft.secretCode, draft.accountTitle);
 
-  const imageUrls = await uploadTelegramImages(draft.imageFileIds);
+  const imagePaths = await uploadTelegramImages(draft.imageFileIds);
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("stock_accounts")
@@ -1248,8 +1309,10 @@ async function createStockAccountFromDraft(draft: TelegramStockDraft, buyingPric
       account_title: draft.accountTitle,
       buying_price: buyingPrice,
       game_name: gameName,
-      image_url: imageUrls[0] ?? null,
-      image_urls: imageUrls,
+      image_url: null,
+      image_urls: [],
+      image_path: imagePaths[0] ?? null,
+      image_paths: imagePaths,
       notes: draft.note ?? null,
       purchase_date: dhakaToday(),
       purchase_source: "Telegram",
@@ -1277,7 +1340,7 @@ async function createStockAccountFromGroupQueueItem(item: TelegramGroupStockQueu
 
   const draft: TelegramStockDraft = {
     accountTitle: item.accountTitle,
-    buyingPrice: item.buyingPrice,
+    buyingPrice: 0,
     chatId: String(chatId),
     createdAt: item.createdAt,
     gameName: item.gameName,
@@ -1293,7 +1356,7 @@ async function createStockAccountFromGroupQueueItem(item: TelegramGroupStockQueu
     userId
   };
 
-  return createStockAccountFromDraft(draft, item.buyingPrice ?? 0);
+  return createStockAccountFromDraft(draft, 0);
 }
 
 async function approveCompleteGroupQueueItems(chatId: number | string, userId: string, limit = 5) {
@@ -1432,6 +1495,7 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
   const sellingPrice = parseSellingPriceFromAccountText(text);
   const item: TelegramGroupStockQueueItem = {
     accountTitle: parsed.accountTitle,
+    buyingPrice: 0,
     createdAt: duplicateQueueItem?.createdAt ?? now,
     gameName: parsed.gameName,
     id: duplicateQueueItem?.id ?? randomUUID(),
@@ -1445,6 +1509,30 @@ async function handleGroupStockMessage(message: TelegramMessage, text: string) {
     status: "pending",
     updatedAt: now
   };
+
+  if (missingGroupQueueFields(item).length === 0) {
+    try {
+      const created = await createStockAccountFromGroupQueueItem(item, String(sourceChatId), "group-auto");
+      if (duplicateQueueItem) {
+        await deleteGroupQueueItem(duplicateQueueItem.id);
+      }
+      await notifyAllowedUsersStockAdded(created, item.sellingPrice, item.sourceChatTitle);
+      return true;
+    } catch (error) {
+      await saveGroupQueueItem(item);
+      if (!duplicateQueueItem) {
+        await Promise.all(
+          [...getAllowedUserIds()].map((allowedUserId) =>
+            sendTelegramMessage(
+              allowedUserId,
+              error instanceof Error ? `Could not auto-add stock account: ${error.message}` : "Could not auto-add stock account."
+            )
+          )
+        );
+      }
+      return true;
+    }
+  }
 
   await saveGroupQueueItem(item);
 
@@ -1520,11 +1608,10 @@ async function applyDraftEdit(chatId: number | string, key: string, draft: Teleg
 
   nextDraft = {
     ...nextDraft,
+    buyingPrice: 0,
     stage: nextDraftStage(nextDraft)
   };
-  nextDraft = await sendOrUpdateDraftPreview(chatId, nextDraft);
-  await saveDraft(key, nextDraft);
-  return true;
+  return saveOrAutoAddDraft(chatId, key, nextDraft);
 }
 
 async function applyGroupQueueEdit(chatId: number | string, userId: string, text: string) {
@@ -1625,7 +1712,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
     let draft: TelegramStockDraft = {
       id: existingDraft?.id ?? randomUUID(),
       accountTitle: parsed?.accountTitle ?? existingDraft?.accountTitle,
-      buyingPrice: existingDraft?.buyingPrice,
+      buyingPrice: 0,
       chatId: String(chatId),
       createdAt: existingDraft?.createdAt ?? now,
       gameName: parsed?.gameName ?? existingDraft?.gameName,
@@ -1641,9 +1728,7 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
     };
 
     draft = { ...draft, stage: nextDraftStage(draft) };
-    draft = await sendOrUpdateDraftPreview(chatId, draft);
-    await saveDraft(key, draft);
-    return true;
+    return saveOrAutoAddDraft(chatId, key, draft);
   }
 
   if (existingDraft) {
@@ -1651,26 +1736,12 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
     if (sellingPrice !== null) {
       let draft: TelegramStockDraft = {
         ...existingDraft,
+        buyingPrice: 0,
         sellingPrice,
         updatedAt: now
       };
       draft = { ...draft, stage: nextDraftStage(draft) };
-      draft = await sendOrUpdateDraftPreview(chatId, draft);
-      await saveDraft(key, draft);
-      return true;
-    }
-
-    const buyingPrice = parseMoney(text);
-    if (buyingPrice !== null) {
-      let draft: TelegramStockDraft = {
-        ...existingDraft,
-        buyingPrice,
-        stage: "ready_for_approval",
-        updatedAt: now
-      };
-      draft = await sendOrUpdateDraftPreview(chatId, draft);
-      await saveDraft(key, draft);
-      return true;
+      return saveOrAutoAddDraft(chatId, key, draft);
     }
 
     const note = [existingDraft.note, text]
@@ -1679,13 +1750,12 @@ async function handleStockDraftMessage(chatId: number | string, userId: string, 
       .trim();
     let draft: TelegramStockDraft = {
       ...existingDraft,
+      buyingPrice: 0,
       note,
       updatedAt: now
     };
     draft = { ...draft, stage: nextDraftStage(draft) };
-    draft = await sendOrUpdateDraftPreview(chatId, draft);
-    await saveDraft(key, draft);
-    return true;
+    return saveOrAutoAddDraft(chatId, key, draft);
   }
 
   return false;
@@ -1699,6 +1769,7 @@ async function startStockDraft(chatId: number | string, userId: string) {
     id: randomUUID(),
     chatId: String(chatId),
     createdAt: now,
+    buyingPrice: 0,
     imageFileIds: [],
     stage: "collecting",
     updatedAt: now,
@@ -1710,15 +1781,14 @@ async function startStockDraft(chatId: number | string, userId: string) {
     stage: nextDraftStage(draft),
     updatedAt: now
   };
-  draft = await sendOrUpdateDraftPreview(chatId, draft);
-  await saveDraft(key, draft);
+  await saveOrAutoAddDraft(chatId, key, draft);
 }
 
 async function createDraftFromGroupQueueItem(chatId: number | string, userId: string, item: TelegramGroupStockQueueItem) {
   const now = new Date().toISOString();
   let draft: TelegramStockDraft = {
     accountTitle: item.accountTitle,
-    buyingPrice: item.buyingPrice,
+    buyingPrice: 0,
     chatId: String(chatId),
     createdAt: now,
     gameName: item.gameName,
@@ -1738,8 +1808,7 @@ async function createDraftFromGroupQueueItem(chatId: number | string, userId: st
     ...draft,
     stage: nextDraftStage(draft)
   };
-  draft = await sendOrUpdateDraftPreview(chatId, draft);
-  await saveDraft(draftKey(chatId, userId), draft);
+  await saveOrAutoAddDraft(chatId, draftKey(chatId, userId), draft);
 }
 
 async function handleStockCallback(callback: TelegramCallbackQuery, chatId: number | string, userId: string) {
@@ -1750,11 +1819,11 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
     const [, action, fieldOrItemId, maybeItemId] = callback.data.split(":");
 
     if (action === "bulk") {
-      await answerTelegramCallback(callback.id, "Approving complete accounts...");
+      await answerTelegramCallback(callback.id, "Adding complete accounts...");
       await flushOpenGroupBlocks(false);
       const result = await approveCompleteGroupQueueItems(chatId, userId);
       const lines = [
-        `Bulk approval finished.`,
+        `Bulk add finished.`,
         `Added: ${result.added}`,
         result.remainingComplete ? `Complete accounts still waiting: ${result.remainingComplete}` : null,
         result.failures.length ? `Errors:\n${result.failures.slice(0, 3).join("\n")}` : null
@@ -1804,7 +1873,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
           "Stock account added.",
           created.secret_code ? `Code: ${created.secret_code}` : null,
           `Title: ${created.account_title}`,
-          `Buying: $${item.buyingPrice}`,
+          "Buying: $0",
           typeof item.sellingPrice === "number" ? `Selling: $${item.sellingPrice}` : "Selling: not set"
         ]
           .filter(Boolean)
@@ -1838,7 +1907,6 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
 
     if (action === "edit") {
       const editableFields: Record<string, TelegramGroupQueueEditField> = {
-        buying_price: "buying_price",
         private_note: "private_note",
         selling_price: "selling_price",
         title: "title"
@@ -1859,7 +1927,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
       });
       await answerTelegramCallback(callback.id, "Send the new value.");
       const labels: Record<TelegramGroupQueueEditField, string> = {
-        buying_price: "buying price, like 10 or $10",
+        buying_price: "buying price",
         private_note: "private note",
         selling_price: "selling price, like 15$ or $15",
         title: "title with code, like ML# 1632 ..."
@@ -1903,7 +1971,6 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
     }
 
     const editableFields: Record<string, NonNullable<TelegramStockDraft["editingField"]>> = {
-      buying_price: "buying_price",
       private_note: "private_note",
       selling_price: "selling_price",
       title: "title"
@@ -1923,7 +1990,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
     await saveDraft(key, updatedDraft);
     await answerTelegramCallback(callback.id, "Send the new value.");
     const labels: Record<NonNullable<TelegramStockDraft["editingField"]>, string> = {
-      buying_price: "buying price, like 10 or $10",
+      buying_price: "buying price",
       private_note: "private note",
       selling_price: "selling price, like 15$ or $15",
       title: "title with code, like ML# 1632 ..."
@@ -1990,7 +2057,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
       "Stock account added.",
       created.secret_code ? `Code: ${created.secret_code}` : null,
       `Title: ${created.account_title}`,
-      `Buying: $${draft.buyingPrice}`,
+      "Buying: $0",
       typeof draft.sellingPrice === "number" ? `Selling: $${draft.sellingPrice}` : "Selling: not set"
     ]
       .filter(Boolean)
@@ -2084,7 +2151,7 @@ export async function POST(request: Request) {
   if (isHelpCommand(text)) {
     await sendTelegramMessage(
       chatId,
-      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/addallmissing - approve complete accounts\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, send Gmail/password private note, then buying price. Selling price is optional and can be added later.\n\nGroup scanner: send ✅, then the account images/title/private note/selling price in any order, then ✅ again. Selling price can be missing. I will collect one account block and send private preview buttons."
+      "Kings Rock Telegram commands:\n/addgame - start a stock draft\n/addgame Game Name - add a saved game name\n/addstock - start a stock draft\n/games - show saved games\n/draft - show current stock draft\n/reviewmissing - review accounts found in groups\n/addallmissing - add complete queued accounts\n/cancelstock - delete current draft\n\nPrivate stock import: forward account screenshots/title, then Gmail/password private note. Buying price is saved as $0 automatically. Selling price is optional and can be added later.\n\nGroup scanner: send ✅, then the account images/title/private note/selling price in any order, then ✅ again. Buying price is saved as $0 automatically. Complete blocks are added without approval."
     );
     return jsonOk({ handled: true });
   }
@@ -2127,7 +2194,7 @@ export async function POST(request: Request) {
     await sendTelegramMessage(
       chatId,
       [
-        "Bulk approval finished.",
+        "Bulk add finished.",
         `Added: ${result.added}`,
         result.remainingComplete ? `Complete accounts still waiting: ${result.remainingComplete}` : null,
         result.failures.length ? `Errors:\n${result.failures.slice(0, 3).join("\n")}` : null

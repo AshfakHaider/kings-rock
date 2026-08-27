@@ -8,7 +8,8 @@ import { StatusBadge } from "@/components/modules/status-badge";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
-import { assignedEmployeeNames, DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockGameNames, getStockTotals, isAccountAssignedTo } from "@/lib/data";
+import { StockZeusxModal, ZeusxStatusBadge } from "@/components/stock/stock-zeusx-modal";
+import { assignedEmployeeNames, canViewStockPrivateData, DEFAULT_PAGE_SIZE, getCurrentProfile, getProfiles, getSettings, getStockAccountsPage, getStockGameNames, getStockTotals } from "@/lib/data";
 import { stockDisplayTitle } from "@/lib/stock-title";
 import type { StockAccount } from "@/lib/types";
 import { formatDate, money } from "@/lib/utils";
@@ -22,20 +23,28 @@ function DetailLink({ href, children }: { href: string; children: React.ReactNod
   );
 }
 
-function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null }>(account: T) {
+function withoutImages<T extends { image_url?: string | null; image_urls?: string[] | null; image_path?: string | null; image_paths?: string[] | null }>(account: T) {
   return {
     ...account,
     image_url: null,
-    image_urls: []
+    image_urls: [],
+    image_path: null,
+    image_paths: []
   };
+}
+
+function imageCount(account: { image_url?: string | null; image_urls?: string[] | null; image_path?: string | null; image_paths?: string[] | null }) {
+  if (account.image_paths?.length) return account.image_paths.length;
+  if (account.image_path) return 1;
+  if (account.image_urls?.length) return account.image_urls.length;
+  return account.image_url ? 1 : 0;
 }
 
 function withPrivateNotesForCurrentUser<T extends Pick<StockAccount, "assigned_employee_id" | "assignments" | "notes">>(
   account: T,
-  currentProfileId: string,
-  isAdmin: boolean
+  canViewPrivateData: boolean
 ) {
-  if (isAdmin || isAccountAssignedTo(account, currentProfileId)) return account;
+  if (canViewPrivateData) return account;
   return { ...account, notes: null };
 }
 
@@ -79,6 +88,8 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
   const employees = profiles.filter((profile) => profile.role !== "admin" && profile.status === "active");
   const canViewBuyingPrice = currentProfile.role !== "employee";
   const canManageStockRecords = currentProfile.role !== "employee";
+  const canManageZeusx = currentProfile.role === "admin";
+  const canViewPrivateData = canViewStockPrivateData(currentProfile);
   const totalAvailable = stockTotals.availableCount;
   const totalAssigned = stockTotals.assignedCount;
   const totalActive = stockTotals.activeCount;
@@ -103,6 +114,7 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
             canViewBuyingPrice={canViewBuyingPrice}
             currentProfileId={currentProfile.id}
             isAdmin={currentProfile.role === "admin"}
+            canViewPrivateData={canViewPrivateData}
             canAssignAnyEmployee={currentProfile.role !== "employee"}
           />
         }
@@ -197,6 +209,14 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
             cell: (row) => <DetailLink href={`/stock-accounts/${row.id}`}><StatusBadge value={row.status} /></DetailLink>,
             searchValue: (row) => row.status
           },
+          ...(canManageZeusx
+            ? [{
+                key: "zeusx",
+                header: "ZeusX",
+                cell: (row: StockRow) => <ZeusxStatusBadge account={row} />,
+                searchValue: (row: StockRow) => row.zeusx_enabled ? `zeusx ${row.zeusx_status ?? "pending"}` : "zeusx off"
+              } as const]
+            : []),
           ...(canManageStockRecords
             ? [{
                 key: "actions",
@@ -206,15 +226,17 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
                     <StockAccountModal
                       variant="edit"
                       trigger="icon"
-                      stock={withPrivateNotesForCurrentUser(withoutImages(row), currentProfile.id, currentProfile.role === "admin")}
-                      existingImageCount={row.image_urls?.length ?? (row.image_url ? 1 : 0)}
+                      stock={withPrivateNotesForCurrentUser(withoutImages(row), canViewPrivateData)}
+                      existingImageCount={imageCount(row)}
                       employees={employees}
                       gameCategories={settings.game_categories}
                       canViewBuyingPrice={canViewBuyingPrice}
                       currentProfileId={currentProfile.id}
                       isAdmin={currentProfile.role === "admin"}
+                      canViewPrivateData={canViewPrivateData}
                       canAssignAnyEmployee={currentProfile.role !== "employee"}
                     />
+                    {canManageZeusx ? <StockZeusxModal stock={withoutImages(row)} /> : null}
                     <form action={deleteStockAccount}>
                       <input type="hidden" name="id" value={row.id} />
                       <DeleteButton label="Delete account" iconOnly />

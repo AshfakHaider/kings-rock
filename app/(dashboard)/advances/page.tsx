@@ -72,12 +72,14 @@ export default async function AdvancesPage({ searchParams }: { searchParams?: Pr
           {
             key: "actions",
             header: "Actions",
-            cell: (row) => (
-              <form action={deleteAdvanceTransaction}>
-                <input type="hidden" name="id" value={row.id} />
-                <DeleteButton label="Delete transaction" iconOnly />
-              </form>
-            )
+            cell: (row) => row.type === "money_given" && row.notes === "Opening advance"
+              ? <span className="text-sm text-muted-foreground">Locked</span>
+              : (
+                <form action={deleteAdvanceTransaction}>
+                  <input type="hidden" name="id" value={row.id} />
+                  <DeleteButton label="Delete transaction" iconOnly />
+                </form>
+              )
           }
         ]}
       />

@@ -71,6 +71,7 @@ export function StockAccountModal({
   existingImageCount,
   currentProfileId,
   isAdmin = false,
+  canViewPrivateData,
   canAssignAnyEmployee = false
 }: {
   employees: Profile[];
@@ -82,6 +83,7 @@ export function StockAccountModal({
   existingImageCount?: number;
   currentProfileId?: string;
   isAdmin?: boolean;
+  canViewPrivateData?: boolean;
   canAssignAnyEmployee?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -111,11 +113,7 @@ export function StockAccountModal({
   const assignmentOptions = canAssignAnyEmployee
     ? employees
     : employees.filter((employee) => employee.id === currentProfileId);
-  const isCurrentProfileAssigned =
-    stock?.assigned_employee_id === currentProfileId ||
-    Boolean(stock?.assignments?.some((assignment) => assignment.employee_id === currentProfileId));
-  const canUsePrivateNotes =
-    isAdmin || assignedEmployeeId === currentProfileId || (isEdit && isCurrentProfileAssigned);
+  const canUsePrivateNotes = Boolean(canViewPrivateData ?? isAdmin);
 
   useEffect(() => {
     setSavedGameCategories(mergeGameCategories(DEFAULT_GAME_CATEGORIES, gameCategories, [stock?.game_name]));

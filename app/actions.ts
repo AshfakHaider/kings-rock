@@ -12,6 +12,16 @@ import { canonicalSaleSource, canonicalSaleSourceKey, uniqueSaleSourceOptions } 
 import { assertCanSaveEmployeeRole } from "@/lib/security/employee-role-policy";
 import { cleanSecretCode, cleanStockText, stripSecretCodeFromTitle } from "@/lib/stock-title";
 import {
+  DEFAULT_ZEUSX_CATEGORY,
+  DEFAULT_ZEUSX_DELIVERY_DAYS,
+  DEFAULT_ZEUSX_DELIVERY_HOURS,
+  DEFAULT_ZEUSX_DELIVERY_METHOD,
+  defaultZeusxDescription,
+  defaultZeusxServer,
+  parseZeusxTags,
+  ZEUSX_STATUS_VALUES
+} from "@/lib/zeusx";
+import {
   addDemoSale,
   addDemoDailyTaskCompletion,
   deleteDemoDailyTask,
@@ -47,14 +57,12 @@ function optionalNumber(formData: FormData, key: string) {
 }
 
 const STOCK_ACCOUNT_SELECT =
-  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at";
+  "id,game_name,account_title,account_details,purchase_source,buying_price,selling_price,image_url,image_urls,image_path,image_paths,secret_code,purchase_date,status,assigned_employee_id,gmail_id,notes,created_by,created_at,updated_at,zeusx_enabled,zeusx_status,zeusx_category,zeusx_game,zeusx_server,zeusx_delivery_method,zeusx_delivery_days,zeusx_delivery_hours,zeusx_description,zeusx_tags,zeusx_listing_url,zeusx_posted_at,zeusx_error";
 const DAILY_TASK_SELECT = "id,title,description,task_date,created_by,created_at";
 const SOLD_ACCOUNT_SELECT =
   "id,stock_account_id,employee_id,sold_amount,sold_source_website,buyer_contact,payment_status,payment_method,payment_received_date,sold_date,notes,created_at";
 const GMAIL_SELECT = "id,email,recovery_info,status,used_for_stock_account_id,date_added,date_used,notes,created_at";
 const PROFILE_SELECT = "id,auth_user_id,name,phone,email,role,status,join_date,notes,created_at";
-const ADVANCE_SELECT = "id,employee_id,amount_given,date_given,purpose,payment_method,status,notes,created_by,created_at";
-const ADVANCE_TRANSACTION_SELECT = "id,advance_id,employee_id,type,amount,stock_account_id,transaction_date,notes,created_by,created_at";
 const EXPENSE_SELECT = "id,title,category,amount,expense_date,paid_by,notes,created_at";
 const DEFAULT_SETTINGS_PAYLOAD = {
   business_name: "Kings Rock",
@@ -120,7 +128,7 @@ async function uploadStockImages(formData: FormData) {
   if (files.length === 0) return [];
 
   const supabase = await createClient();
-  const urls: string[] = [];
+  const paths: string[] = [];
 
   for (const file of files) {
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
@@ -133,11 +141,10 @@ async function uploadStockImages(formData: FormData) {
       throw new Error(`Image upload failed: ${error.message}`);
     }
 
-    const { data } = supabase.storage.from("stock-images").getPublicUrl(path);
-    urls.push(data.publicUrl);
+    paths.push(path);
   }
 
-  return urls;
+  return paths;
 }
 
 async function uploadDailyTaskScreenshots(formData: FormData) {
@@ -652,7 +659,7 @@ export async function saveStockAccount(formData: FormData) {
     profile.role === "employee" && submittedAssignedEmployeeId && submittedAssignedEmployeeId !== profile.id
       ? profile.id
       : submittedAssignedEmployeeId;
-  const imageUrls = await uploadStockImages(formData);
+  const imagePaths = await uploadStockImages(formData);
   const existing = id
     ? (await supabase.from("stock_accounts").select("buying_price,assigned_employee_id,notes").eq("id", id).single()).data
     : null;
@@ -695,7 +702,7 @@ export async function saveStockAccount(formData: FormData) {
         ? Number(existing?.buying_price ?? 0)
         : number(formData, "buying_price"),
     selling_price: optionalNumber(formData, "selling_price"),
-    ...(imageUrls.length ? { image_url: imageUrls[0], image_urls: imageUrls } : {}),
+    ...(imagePaths.length ? { image_path: imagePaths[0], image_paths: imagePaths, image_url: null, image_urls: [] } : {}),
     secret_code: secretCode,
     purchase_date: text(formData, "purchase_date"),
     status: text(formData, "status") ?? "available",
@@ -715,6 +722,71 @@ export async function saveStockAccount(formData: FormData) {
   await logActivity(id ? "account_edited" : "account_added", "stock_accounts", id, null, result.data);
   revalidatePath("/stock-accounts");
   revalidatePath("/");
+}
+
+export async function saveStockZeusxSettings(formData: FormData) {
+  if (!hasSupabaseEnv()) {
+    throw new Error("ZeusX posting requires Supabase.");
+  }
+
+  const profile = await getCurrentProfile();
+  if (profile.role !== "admin") {
+    throw new Error("Only admins can manage ZeusX posting.");
+  }
+
+  const id = text(formData, "id");
+  if (!id) throw new Error("Stock account is required.");
+
+  const supabase = await createClient();
+  const { data: account, error: accountError } = await supabase
+    .from("stock_accounts")
+    .select("id,game_name,account_title,secret_code,selling_price,zeusx_error")
+    .eq("id", id)
+    .single();
+
+  if (accountError || !account) {
+    throw new Error(accountError?.message ?? "Stock account not found.");
+  }
+
+  const enabled = formData.get("zeusx_enabled") === "on";
+  const submittedStatus = text(formData, "zeusx_status");
+  const zeusxStatus = ZEUSX_STATUS_VALUES.includes(submittedStatus as (typeof ZEUSX_STATUS_VALUES)[number])
+    ? (submittedStatus as (typeof ZEUSX_STATUS_VALUES)[number])
+    : "pending";
+  const nextStatus = enabled ? zeusxStatus : "pending";
+  const category = cleanStockText(text(formData, "zeusx_category")) || DEFAULT_ZEUSX_CATEGORY;
+  const game = cleanStockText(text(formData, "zeusx_game")) || account.game_name;
+  const server = cleanStockText(text(formData, "zeusx_server")) || defaultZeusxServer(account.game_name);
+  const deliveryMethod = cleanStockText(text(formData, "zeusx_delivery_method")) || DEFAULT_ZEUSX_DELIVERY_METHOD;
+  const description = cleanStockText(text(formData, "zeusx_description")) || defaultZeusxDescription(account as StockAccount);
+  const tags = parseZeusxTags(text(formData, "zeusx_tags"));
+
+  const payload = {
+    zeusx_enabled: enabled,
+    zeusx_status: nextStatus,
+    zeusx_category: category,
+    zeusx_game: game,
+    zeusx_server: server,
+    zeusx_delivery_method: deliveryMethod,
+    zeusx_delivery_days: Math.max(0, Math.trunc(number(formData, "zeusx_delivery_days") || DEFAULT_ZEUSX_DELIVERY_DAYS)),
+    zeusx_delivery_hours: Math.max(0, Math.trunc(number(formData, "zeusx_delivery_hours") || DEFAULT_ZEUSX_DELIVERY_HOURS)),
+    zeusx_description: description,
+    zeusx_tags: tags,
+    zeusx_error: nextStatus === "pending" || nextStatus === "posting" ? null : account.zeusx_error
+  };
+
+  const { data, error } = await supabase
+    .from("stock_accounts")
+    .update(payload)
+    .eq("id", id)
+    .select(STOCK_ACCOUNT_SELECT)
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  await logActivity("zeusx_settings_updated", "stock_accounts", id, account, data);
+  revalidatePath("/stock-accounts");
+  revalidatePath(`/stock-accounts/${id}`);
 }
 
 export async function deleteStockAccount(formData: FormData) {
@@ -1525,23 +1597,34 @@ export async function saveAdvance(formData: FormData) {
     created_by: profile.id
   };
 
-  const result = id
-    ? await supabase.from("employee_advances").update(payload).eq("id", id).select().single()
-    : await supabase.from("employee_advances").insert(payload).select().single();
-
-  if (!id && result.data) {
-    await supabase.from("advance_transactions").insert({
-      advance_id: result.data.id,
-      employee_id: payload.employee_id,
-      type: "money_given",
-      amount: payload.amount_given,
-      transaction_date: payload.date_given,
-      notes: "Opening advance",
-      created_by: profile.id
+  if (id) {
+    const { error } = await supabase.rpc("update_employee_advance", {
+      p_advance_id: id,
+      p_employee_id: payload.employee_id,
+      p_amount_given: payload.amount_given,
+      p_date_given: payload.date_given,
+      p_purpose: payload.purpose,
+      p_payment_method: payload.payment_method,
+      p_status: payload.status,
+      p_notes: payload.notes
     });
+
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabase.rpc("create_employee_advance", {
+      p_employee_id: payload.employee_id,
+      p_amount_given: payload.amount_given,
+      p_date_given: payload.date_given,
+      p_purpose: payload.purpose,
+      p_payment_method: payload.payment_method,
+      p_status: payload.status,
+      p_notes: payload.notes,
+      p_request_id: text(formData, "request_id") ?? randomUUID()
+    });
+
+    if (error) throw new Error(error.message);
   }
 
-  await logActivity(id ? "advance_edited" : "advance_added", "employee_advances", id, null, result.data);
   revalidatePath("/advances");
   revalidatePath("/");
 }
@@ -1561,24 +1644,12 @@ export async function deleteAdvance(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("employee_advances").select(ADVANCE_SELECT).eq("id", id).maybeSingle();
-  const { data: oldTransactions } = await supabase.from("advance_transactions").select(ADVANCE_TRANSACTION_SELECT).eq("advance_id", id);
-  const { error: transactionDeleteError } = await supabase.from("advance_transactions").delete().eq("advance_id", id);
+  const { error } = await supabase.rpc("delete_employee_advance", {
+    p_advance_id: id
+  });
 
-  if (transactionDeleteError) {
-    throw new Error(transactionDeleteError.message);
-  }
+  if (error) throw new Error(error.message);
 
-  const { error } = await supabase.from("employee_advances").delete().eq("id", id);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await logActivity("advance_deleted", "employee_advances", id, oldData, null);
-  if (oldTransactions?.length) {
-    await logActivity("advance_transactions_deleted", "advance_transactions", id, oldTransactions, null);
-  }
   revalidatePath("/advances");
   revalidatePath("/employees");
   revalidatePath("/monthly-performance");
@@ -1589,19 +1660,25 @@ export async function deleteAdvance(formData: FormData) {
 export async function saveAdvanceTransaction(formData: FormData) {
   if (!hasSupabaseEnv()) return;
   const supabase = await createClient();
-  const profile = await getCurrentProfile();
   const payload = {
     advance_id: text(formData, "advance_id"),
-    employee_id: text(formData, "employee_id"),
     type: text(formData, "type") ?? "adjustment",
     amount: number(formData, "amount"),
     stock_account_id: text(formData, "stock_account_id"),
     transaction_date: text(formData, "transaction_date"),
-    notes: text(formData, "notes"),
-    created_by: profile.id
+    notes: text(formData, "notes")
   };
-  const { data } = await supabase.from("advance_transactions").insert(payload).select().single();
-  await logActivity("advance_transaction_added", "advance_transactions", data?.id ?? null, null, data);
+  const { error } = await supabase.rpc("add_advance_transaction", {
+    p_advance_id: payload.advance_id,
+    p_type: payload.type,
+    p_amount: payload.amount,
+    p_stock_account_id: payload.stock_account_id,
+    p_transaction_date: payload.transaction_date,
+    p_notes: payload.notes
+  });
+
+  if (error) throw new Error(error.message);
+
   revalidatePath("/advances");
   revalidatePath("/");
 }
@@ -1621,14 +1698,14 @@ export async function deleteAdvanceTransaction(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const { data: oldData } = await supabase.from("advance_transactions").select(ADVANCE_TRANSACTION_SELECT).eq("id", id).maybeSingle();
-  const { error } = await supabase.from("advance_transactions").delete().eq("id", id);
+  const { error } = await supabase.rpc("delete_advance_transaction", {
+    p_transaction_id: id
+  });
 
   if (error) {
     throw new Error(error.message);
   }
 
-  await logActivity("advance_transaction_deleted", "advance_transactions", id, oldData, null);
   revalidatePath("/advances");
   revalidatePath("/employees");
   revalidatePath("/monthly-performance");

@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type React from "react";
 import { saveAdvance, saveAdvanceTransaction, saveEmployee, saveExpense, saveGmail, saveSale, saveSettings, saveStockAccount } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -219,6 +220,7 @@ export function EmployeeForm() {
 export function AdvanceForm({ employees }: { employees: Profile[] }) {
   return (
     <form action={saveAdvance} className="grid gap-4 md:grid-cols-2">
+      <input type="hidden" name="request_id" value={randomUUID()} />
       <div className="space-y-2">
         <Label>Employee</Label>
         <Select name="employee_id" required>

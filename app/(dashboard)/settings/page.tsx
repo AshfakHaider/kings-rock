@@ -25,9 +25,16 @@ export default async function SettingsPage() {
         </div>
         <div className="rounded-lg border bg-card p-4 shadow-soft">
           <p className="text-sm text-muted-foreground">Employee permissions</p>
-          <pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs">
-            {JSON.stringify(settings.employee_permissions, null, 2)}
-          </pre>
+          <dl className="mt-3 grid gap-3 text-sm">
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted p-3">
+              <dt className="text-muted-foreground">Can view profit</dt>
+              <dd className="font-medium">{settings.employee_permissions.can_view_profit ? "Yes" : "No"}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-md bg-muted p-3">
+              <dt className="text-muted-foreground">Can view buying price</dt>
+              <dd className="font-medium">{settings.employee_permissions.can_view_buying_price ? "Yes" : "No"}</dd>
+            </div>
+          </dl>
         </div>
       </div>
     </>

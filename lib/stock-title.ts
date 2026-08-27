@@ -31,7 +31,8 @@ export function stripSecretCodeFromTitle(title: string | null | undefined, code:
   if (!cleanedTitle || !cleanedCode) return cleanedTitle;
 
   const escapedCode = cleanedCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return cleanedTitle.replace(new RegExp(`^${escapedCode}\\s*[-:|/]*\\s*`, "i"), "").trim() || cleanedTitle;
+  const titleSeparatorPattern = ["\\-", ":", "\\|", "\\/"].join("");
+  return cleanedTitle.replace(new RegExp(`^${escapedCode}\\s*[${titleSeparatorPattern}]*\\s*`, "i"), "").trim() || cleanedTitle;
 }
 
 export function stockDisplayTitle(code: string | null | undefined, title: string | null | undefined) {
