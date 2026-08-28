@@ -47,7 +47,11 @@ export function StockZeusxModal({ stock }: { stock: StockAccount }) {
   function submit(formData: FormData) {
     startTransition(async () => {
       try {
-        await saveStockZeusxSettings(formData);
+        const result = await saveStockZeusxSettings(formData);
+        if (!result.ok) {
+          setNotice(result.message ?? "ZeusX settings could not be saved.");
+          return;
+        }
         setOpen(false);
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "ZeusX settings could not be saved.");

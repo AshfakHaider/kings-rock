@@ -81,6 +81,25 @@ type AssignmentActionResult = {
   message?: string;
 };
 
+type ActionResult = {
+  ok: boolean;
+  message?: string;
+};
+
+function zeusxActionErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+
+  if (/zeusx_|schema cache|column .* does not exist|PGRST204/i.test(message)) {
+    return "ZeusX database fields are missing on this database. Run the ZeusX migration, then redeploy.";
+  }
+
+  if (/row-level security|permission denied|not authorized/i.test(message)) {
+    return "ZeusX save was blocked by database security. Confirm this account is admin and the ZeusX policies are installed.";
+  }
+
+  return message || "ZeusX settings could not be saved.";
+}
+
 function saleSourceFromFormData(formData: FormData) {
   const selectedSource = text(formData, "sold_source_website");
   const customSource = text(formData, "sold_source_website_custom");
@@ -724,28 +743,28 @@ export async function saveStockAccount(formData: FormData) {
   revalidatePath("/");
 }
 
-export async function saveStockZeusxSettings(formData: FormData) {
+export async function saveStockZeusxSettings(formData: FormData): Promise<ActionResult> {
   if (!hasSupabaseEnv()) {
-    throw new Error("ZeusX posting requires Supabase.");
+    return { ok: false, message: "ZeusX posting requires Supabase." };
   }
 
   const profile = await getCurrentProfile();
   if (profile.role !== "admin") {
-    throw new Error("Only admins can manage ZeusX posting.");
+    return { ok: false, message: "Only admins can manage ZeusX posting." };
   }
 
   const id = text(formData, "id");
-  if (!id) throw new Error("Stock account is required.");
+  if (!id) return { ok: false, message: "Stock account is required." };
 
-  const supabase = await createClient();
+  const supabase = hasSupabaseAdminEnv() ? createAdminClient() : await createClient();
   const { data: account, error: accountError } = await supabase
     .from("stock_accounts")
-    .select("id,game_name,account_title,secret_code,selling_price,zeusx_error")
+    .select("id,game_name,account_title,secret_code,selling_price")
     .eq("id", id)
     .single();
 
   if (accountError || !account) {
-    throw new Error(accountError?.message ?? "Stock account not found.");
+    return { ok: false, message: zeusxActionErrorMessage(accountError ?? new Error("Stock account not found.")) };
   }
 
   const enabled = formData.get("zeusx_enabled") === "on";
@@ -772,7 +791,7 @@ export async function saveStockZeusxSettings(formData: FormData) {
     zeusx_delivery_hours: Math.max(0, Math.trunc(number(formData, "zeusx_delivery_hours") || DEFAULT_ZEUSX_DELIVERY_HOURS)),
     zeusx_description: description,
     zeusx_tags: tags,
-    zeusx_error: nextStatus === "pending" || nextStatus === "posting" ? null : account.zeusx_error
+    zeusx_error: nextStatus === "pending" || nextStatus === "posting" ? null : undefined
   };
 
   const { data, error } = await supabase
@@ -782,11 +801,14 @@ export async function saveStockZeusxSettings(formData: FormData) {
     .select(STOCK_ACCOUNT_SELECT)
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    return { ok: false, message: zeusxActionErrorMessage(error) };
+  }
 
   await logActivity("zeusx_settings_updated", "stock_accounts", id, account, data);
   revalidatePath("/stock-accounts");
   revalidatePath(`/stock-accounts/${id}`);
+  return { ok: true };
 }
 
 export async function deleteStockAccount(formData: FormData) {
