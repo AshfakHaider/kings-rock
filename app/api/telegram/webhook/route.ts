@@ -1344,6 +1344,15 @@ async function notifyAllowedUsersStockAdded(
   );
 }
 
+async function notifyAllowedUsersImportError(error: unknown, context: string) {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  await Promise.all(
+    [...getAllowedUserIds()].map((allowedUserId) =>
+      sendTelegramMessage(allowedUserId, `${context}: ${message}`)
+    )
+  );
+}
+
 function isMissingTelegramSourcesTableError(error: { code?: string; message?: string }) {
   const message = error.message ?? "";
   return error.code === "42P01" || message.includes("telegram_stock_sources") || message.includes("schema cache");
@@ -2311,8 +2320,16 @@ export async function POST(request: Request) {
       return jsonOk({ handled: true });
     }
 
-    await setTelegramCommands();
-    await handleStockCallback(callback, callbackChatId, callbackUserId);
+    try {
+      await setTelegramCommands();
+      await handleStockCallback(callback, callbackChatId, callbackUserId);
+    } catch (error) {
+      await answerTelegramCallback(callback.id, "Telegram stock action failed.");
+      await sendTelegramMessage(
+        callbackChatId,
+        error instanceof Error ? `Telegram stock action failed: ${error.message}` : "Telegram stock action failed."
+      );
+    }
     return jsonOk({ handled: true });
   }
 
@@ -2341,7 +2358,11 @@ export async function POST(request: Request) {
   }
 
   if (message && isGroupChat(message)) {
-    await handleGroupStockMessage(message, text);
+    try {
+      await handleGroupStockMessage(message, text);
+    } catch (error) {
+      await notifyAllowedUsersImportError(error, "Telegram group stock import failed");
+    }
     return jsonOk({ handled: true });
   }
 
@@ -2436,7 +2457,17 @@ export async function POST(request: Request) {
     return jsonOk({ handled: true });
   }
 
-  const handledStockDraft = await handleStockDraftMessage(chatId, userId, message, text);
+  let handledStockDraft = false;
+  try {
+    handledStockDraft = await handleStockDraftMessage(chatId, userId, message, text);
+  } catch (error) {
+    await sendTelegramMessage(
+      chatId,
+      error instanceof Error ? `Telegram stock import failed: ${error.message}` : "Telegram stock import failed."
+    );
+    return jsonOk({ handled: true });
+  }
+
   if (!handledStockDraft) {
     await sendTelegramMessage(
       chatId,

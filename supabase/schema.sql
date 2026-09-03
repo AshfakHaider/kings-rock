@@ -510,6 +510,7 @@ on public.telegram_stock_sources for delete
 using (public.is_manager_or_admin());
 
 grant select, insert, update, delete on public.telegram_stock_sources to authenticated;
+grant select, insert, update, delete on public.telegram_stock_sources to service_role;
 
 grant select, insert, update on public.stock_account_credentials to authenticated;
 
@@ -662,6 +663,8 @@ with check (public.is_admin());
 create policy "telegram runtime admin delete"
 on public.telegram_runtime_state for delete
 using (public.is_admin());
+
+grant select, insert, update, delete on public.telegram_runtime_state to service_role;
 
 revoke all on public.gmail_inventory from authenticated;
 grant select(id, email, recovery_info, status, used_for_stock_account_id, date_added, date_used, notes, created_at), insert, update on public.gmail_inventory to authenticated;

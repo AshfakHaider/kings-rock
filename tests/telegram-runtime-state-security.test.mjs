@@ -54,6 +54,29 @@ test("telegram runtime table has no broad authenticated RLS policy", async () =>
   }
 });
 
+test("telegram runtime tables grant server worker access without broad user access", async () => {
+  const schema = await readFile("supabase/schema.sql", "utf8");
+  const migration = await readFile("supabase/migrations/20260903190000_telegram_runtime_service_role_grants.sql", "utf8");
+
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /grant select, insert, update, delete on public\.telegram_runtime_state to service_role/);
+    assert.match(sql, /grant select, insert, update, delete on public\.telegram_stock_sources to service_role/);
+  }
+
+  assert.doesNotMatch(
+    migration,
+    /grant select, insert, update, delete on public\.telegram_runtime_state to authenticated/i
+  );
+});
+
+test("telegram webhook reports import failures instead of silently crashing", async () => {
+  const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
+
+  assert.match(source, /async function notifyAllowedUsersImportError/);
+  assert.match(source, /Telegram group stock import failed/);
+  assert.match(source, /Telegram stock import failed/);
+});
+
 test("telegram stock imports default buying price to zero and do not require approval", async () => {
   const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
 
