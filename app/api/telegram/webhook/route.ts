@@ -1186,6 +1186,20 @@ function groupQueueItemText(item: TelegramGroupStockQueueItem, index?: number, t
     .join("\n");
 }
 
+function missingGroupQueueNoticeText(item: TelegramGroupStockQueueItem) {
+  const missing = missingGroupQueueFields(item);
+  const label = item.secretCode || item.accountTitle || "unknown account";
+
+  return [
+    `Missing stock account: ${label}`,
+    missing.length ? `Missing: ${missing.join(", ")}` : null,
+    item.sourceChatTitle ? `Source: ${item.sourceChatTitle}` : null,
+    "It stayed in review. Use the buttons below or /reviewmissing."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function missingGroupQueueFields(item: TelegramGroupStockQueueItem) {
   const missing: string[] = [];
   if (!item.accountTitle) missing.push("title");
@@ -1201,7 +1215,7 @@ function groupQueueMarkup(item: TelegramGroupStockQueueItem, completeCount = 0) 
     ? [
         { text: "Add now", callback_data: `group:approve:${itemId}` },
         { text: "Edit", callback_data: `group:editmenu:${itemId}` },
-        { text: "Skip", callback_data: `group:skip:${itemId}` }
+        { text: "Delete", callback_data: `group:skip:${itemId}` }
       ]
     : [
         { text: "Private note", callback_data: `group:edit:private_note:${itemId}` }
@@ -1214,7 +1228,7 @@ function groupQueueMarkup(item: TelegramGroupStockQueueItem, completeCount = 0) 
     ],
     [
       { text: "Use draft", callback_data: `group:review:${itemId}` },
-      { text: "Skip", callback_data: `group:skip:${itemId}` }
+      { text: "Delete", callback_data: `group:skip:${itemId}` }
     ]
   ];
 
@@ -1304,10 +1318,13 @@ async function sendNextGroupQueueItem(chatId: number | string) {
 
 async function notifyAllowedUsersAboutGroupItem(item: TelegramGroupStockQueueItem) {
   const allowedUserIds = [...getAllowedUserIds()];
+  const messageText = missingGroupQueueFields(item).length
+    ? missingGroupQueueNoticeText(item)
+    : groupQueueItemText(item);
 
   await Promise.all(
     allowedUserIds.map((allowedUserId) =>
-      sendTelegramMessage(allowedUserId, groupQueueItemText(item), {
+      sendTelegramMessage(allowedUserId, messageText, {
         reply_markup: groupQueueMarkup(item)
       })
     )
@@ -1453,6 +1470,92 @@ async function updateStockFromEditedTelegramMessage(message: TelegramMessage, te
     .join("\n");
 
   await Promise.all([...getAllowedUserIds()].map((allowedUserId) => sendTelegramMessage(allowedUserId, lines)));
+  return true;
+}
+
+function updateGroupQueueItemFromTelegramMessage(
+  item: TelegramGroupStockQueueItem,
+  message: TelegramMessage,
+  text: string,
+  categories: string[]
+) {
+  const now = new Date().toISOString();
+  const imageFileIds = getImageFileIds(message);
+  const sourceMessage = sourceMessageFromTelegramMessage(message, text, imageFileIds);
+  const trimmedText = cleanStockText(text);
+  let nextItem: TelegramGroupStockQueueItem = {
+    ...item,
+    imageFileIds: [...new Set([...item.imageFileIds, ...imageFileIds])].slice(0, 15),
+    sourceMessages: mergeSourceMessages(item.sourceMessages, sourceMessage),
+    updatedAt: now
+  };
+
+  if (!trimmedText) return nextItem;
+
+  const inlineSellingPrice = parseSellingPriceFromAccountText(trimmedText);
+  const standaloneMoney = parseMoney(trimmedText);
+  if (typeof nextItem.sellingPrice !== "number" && (inlineSellingPrice !== null || standaloneMoney !== null)) {
+    nextItem = {
+      ...nextItem,
+      sellingPrice: inlineSellingPrice ?? standaloneMoney ?? undefined
+    };
+  }
+
+  if (extractSecretCode(trimmedText)) {
+    const parsed = parseAccountText(trimmedText, categories);
+    return {
+      ...nextItem,
+      accountTitle: parsed.accountTitle,
+      gameName: parsed.gameName,
+      secretCode: parsed.secretCode
+    };
+  }
+
+  if (looksLikePrivateNote(trimmedText)) {
+    return {
+      ...nextItem,
+      note: trimmedText
+    };
+  }
+
+  return nextItem;
+}
+
+async function updateGroupQueueFromEditedTelegramMessage(message: TelegramMessage, text: string) {
+  if (!isGroupChat(message)) return false;
+
+  const chatId = message.chat?.id;
+  const messageId = message.message_id;
+  if (!chatId || !messageId) return false;
+
+  const settings = await getSettings();
+  const queue = getGroupQueue(settings);
+  const item = Object.values(queue).find(
+    (queueItem) =>
+      queueItem.sourceMessageId === messageId ||
+      queueItem.sourceMessages?.some((sourceMessage) => sourceMessage.messageId === messageId)
+  );
+
+  if (!item) return false;
+
+  const settingsCategories = Array.isArray(settings?.game_categories) ? settings.game_categories : [];
+  const nextItem = updateGroupQueueItemFromTelegramMessage(item, message, text, settingsCategories);
+
+  if (!missingGroupQueueFields(nextItem).length) {
+    try {
+      const created = await createStockAccountFromGroupQueueItem(nextItem, String(chatId), "group-edit");
+      await deleteGroupQueueItem(nextItem.id);
+      await notifyAllowedUsersStockAdded(created, nextItem.sellingPrice, nextItem.sourceChatTitle);
+      return true;
+    } catch (error) {
+      await saveGroupQueueItem(nextItem);
+      await notifyAllowedUsersImportError(error, "Could not auto-add edited missing stock account");
+      return true;
+    }
+  }
+
+  await saveGroupQueueItem(nextItem);
+  await notifyAllowedUsersAboutGroupItem(nextItem);
   return true;
 }
 
@@ -2344,7 +2447,9 @@ export async function POST(request: Request) {
 
   if (update.edited_message && message) {
     try {
-      const updated = await updateStockFromEditedTelegramMessage(message, text);
+      const updatedStock = await updateStockFromEditedTelegramMessage(message, text);
+      const updatedQueue = updatedStock ? false : await updateGroupQueueFromEditedTelegramMessage(message, text);
+      const updated = updatedStock || updatedQueue;
       return jsonOk({ edited: true, updated });
     } catch (error) {
       if (!message || !isGroupChat(message)) {

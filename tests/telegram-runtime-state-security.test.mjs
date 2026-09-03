@@ -77,6 +77,27 @@ test("telegram webhook reports import failures instead of silently crashing", as
   assert.match(source, /Telegram stock import failed/);
 });
 
+test("telegram group queue reports missing accounts and keeps delete controls", async () => {
+  const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
+
+  assert.match(source, /function missingGroupQueueNoticeText/);
+  assert.match(source, /Missing stock account:/);
+  assert.match(source, /Missing: \$\{missing\.join\(", "\)\}/);
+  assert.match(source, /Use the buttons below or \/reviewmissing/);
+  assert.match(source, /callback_data: `group:skip:\$\{itemId\}`/);
+  assert.match(source, /text: "Delete"/);
+});
+
+test("telegram edited group messages can complete queued missing accounts", async () => {
+  const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
+
+  assert.match(source, /async function updateGroupQueueFromEditedTelegramMessage/);
+  assert.match(source, /function updateGroupQueueItemFromTelegramMessage/);
+  assert.match(source, /queueItem\.sourceMessages\?\.some\(\(sourceMessage\) => sourceMessage\.messageId === messageId\)/);
+  assert.match(source, /const updatedQueue = updatedStock \? false : await updateGroupQueueFromEditedTelegramMessage\(message, text\)/);
+  assert.match(source, /await createStockAccountFromGroupQueueItem\(nextItem, String\(chatId\), "group-edit"\)/);
+});
+
 test("telegram stock imports default buying price to zero and do not require approval", async () => {
   const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
 
