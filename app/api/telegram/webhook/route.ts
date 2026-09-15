@@ -995,6 +995,11 @@ function findDuplicateStockAccount(
   });
 }
 
+function isDuplicateStockAccountError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /duplicate stock account|stock_accounts_secret_code_key|duplicate key value/i.test(message);
+}
+
 async function isDuplicateStockAccount(secretCode: string | null | undefined, accountTitle: string) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -1633,6 +1638,7 @@ async function approveCompleteGroupQueueItems(chatId: number | string, userId: s
   const items = (await pendingGroupQueueItems()).filter((item) => missingGroupQueueFields(item).length === 0);
   const selectedItems = items.slice(0, limit);
   const failures: string[] = [];
+  const skippedExisting: string[] = [];
   let added = 0;
 
   for (const item of selectedItems) {
@@ -1641,6 +1647,12 @@ async function approveCompleteGroupQueueItems(chatId: number | string, userId: s
       await deleteGroupQueueItem(item.id);
       added += 1;
     } catch (error) {
+      if (isDuplicateStockAccountError(error)) {
+        await deleteGroupQueueItem(item.id);
+        skippedExisting.push(item.secretCode ?? item.accountTitle);
+        continue;
+      }
+
       failures.push(
         `${item.secretCode ?? item.accountTitle}: ${
           error instanceof Error ? error.message : "could not add"
@@ -1650,7 +1662,7 @@ async function approveCompleteGroupQueueItems(chatId: number | string, userId: s
   }
 
   const remainingComplete = Math.max(0, items.length - selectedItems.length);
-  return { added, failures, remainingComplete };
+  return { added, failures, remainingComplete, skippedExisting };
 }
 
 function findGroupQueueDuplicate(
@@ -2527,6 +2539,7 @@ export async function POST(request: Request) {
       [
         "Bulk add finished.",
         `Added: ${result.added}`,
+        result.skippedExisting.length ? `Skipped existing: ${result.skippedExisting.join(", ")}` : null,
         result.remainingComplete ? `Complete accounts still waiting: ${result.remainingComplete}` : null,
         result.failures.length ? `Errors:\n${result.failures.slice(0, 3).join("\n")}` : null
       ]

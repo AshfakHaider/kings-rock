@@ -98,6 +98,17 @@ test("telegram edited group messages can complete queued missing accounts", asyn
   assert.match(source, /await createStockAccountFromGroupQueueItem\(nextItem, String\(chatId\), "group-edit"\)/);
 });
 
+test("telegram bulk add skips already existing accounts and removes them from review", async () => {
+  const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
+
+  assert.match(source, /function isDuplicateStockAccountError/);
+  assert.match(source, /stock_accounts_secret_code_key/);
+  assert.match(source, /const skippedExisting: string\[\] = \[\]/);
+  assert.match(source, /if \(isDuplicateStockAccountError\(error\)\)/);
+  assert.match(source, /await deleteGroupQueueItem\(item\.id\);\s+skippedExisting\.push/s);
+  assert.match(source, /Skipped existing: \$\{result\.skippedExisting\.join\(", "\)\}/);
+});
+
 test("telegram stock imports default buying price to zero and do not require approval", async () => {
   const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
 
