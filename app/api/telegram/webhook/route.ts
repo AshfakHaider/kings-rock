@@ -1172,7 +1172,7 @@ function draftEditMarkup() {
 function groupQueueItemText(item: TelegramGroupStockQueueItem, index?: number, total?: number) {
   const missing = missingGroupQueueFields(item);
   return [
-    typeof index === "number" && typeof total === "number" ? `Missing group account ${index + 1}/${total}` : "Missing group account",
+    typeof index === "number" && typeof total === "number" ? `Incomplete group account ${index + 1}/${total}` : "Incomplete group account",
     "",
     item.secretCode ? `Code: ${item.secretCode}` : "Code: missing",
     `Game: ${item.gameName}`,
@@ -1635,8 +1635,10 @@ async function createStockAccountFromGroupQueueItem(item: TelegramGroupStockQueu
 }
 
 async function approveCompleteGroupQueueItems(chatId: number | string, userId: string, limit = 5) {
-  const items = (await pendingGroupQueueItems()).filter((item) => missingGroupQueueFields(item).length === 0);
-  const selectedItems = items.slice(0, limit);
+  const queueItems = await pendingGroupQueueItems();
+  const completeItems = queueItems.filter((item) => missingGroupQueueFields(item).length === 0);
+  const selectedItems = completeItems.slice(0, limit);
+  const nextIncomplete = queueItems.find((item) => missingGroupQueueFields(item).length > 0);
   const failures: string[] = [];
   const skippedExisting: string[] = [];
   let added = 0;
@@ -1661,8 +1663,15 @@ async function approveCompleteGroupQueueItems(chatId: number | string, userId: s
     }
   }
 
-  const remainingComplete = Math.max(0, items.length - selectedItems.length);
-  return { added, failures, remainingComplete, skippedExisting };
+  const remainingComplete = Math.max(0, completeItems.length - selectedItems.length);
+  return {
+    added,
+    failures,
+    incompleteWaiting: queueItems.length - completeItems.length,
+    nextIncompleteMissing: nextIncomplete ? missingGroupQueueFields(nextIncomplete) : [],
+    remainingComplete,
+    skippedExisting
+  };
 }
 
 function findGroupQueueDuplicate(
@@ -2541,6 +2550,8 @@ export async function POST(request: Request) {
         `Added: ${result.added}`,
         result.skippedExisting.length ? `Skipped existing: ${result.skippedExisting.join(", ")}` : null,
         result.remainingComplete ? `Complete accounts still waiting: ${result.remainingComplete}` : null,
+        result.incompleteWaiting ? `Incomplete accounts waiting: ${result.incompleteWaiting}` : null,
+        result.nextIncompleteMissing.length ? `Next incomplete needs: ${result.nextIncompleteMissing.join(", ")}` : null,
         result.failures.length ? `Errors:\n${result.failures.slice(0, 3).join("\n")}` : null
       ]
         .filter(Boolean)

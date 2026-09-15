@@ -81,6 +81,7 @@ test("telegram group queue reports missing accounts and keeps delete controls", 
   const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
 
   assert.match(source, /function missingGroupQueueNoticeText/);
+  assert.match(source, /Incomplete group account/);
   assert.match(source, /Missing stock account:/);
   assert.match(source, /Missing: \$\{missing\.join\(", "\)\}/);
   assert.match(source, /Use the buttons below or \/reviewmissing/);
@@ -107,6 +108,8 @@ test("telegram bulk add skips already existing accounts and removes them from re
   assert.match(source, /if \(isDuplicateStockAccountError\(error\)\)/);
   assert.match(source, /await deleteGroupQueueItem\(item\.id\);\s+skippedExisting\.push/s);
   assert.match(source, /Skipped existing: \$\{result\.skippedExisting\.join\(", "\)\}/);
+  assert.match(source, /Incomplete accounts waiting: \$\{result\.incompleteWaiting\}/);
+  assert.match(source, /Next incomplete needs: \$\{result\.nextIncompleteMissing\.join\(", "\)\}/);
 });
 
 test("telegram stock imports default buying price to zero and do not require approval", async () => {
