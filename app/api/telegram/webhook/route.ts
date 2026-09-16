@@ -459,6 +459,10 @@ function isEmptyShellGroupQueueItem(item: TelegramGroupStockQueueItem) {
   );
 }
 
+function isUnusableGroupQueueItem(item: TelegramGroupStockQueueItem) {
+  return !item.accountTitle && !item.imageFileIds.length;
+}
+
 async function saveDraft(key: string, draft: TelegramStockDraft | null) {
   const settings = await getSettings();
 
@@ -514,6 +518,30 @@ async function deleteGroupQueueItem(itemId: string) {
   delete queue[itemId];
 
   await saveTelegramRuntimeMap("telegram_group_stock_queue", queue);
+}
+
+async function pruneUnusableGroupQueueItems() {
+  const settings = await getSettings();
+
+  if (!settings) {
+    throw new Error("Settings row was not found. Add settings first from the app.");
+  }
+
+  const queue = {
+    ...getGroupQueue(settings)
+  };
+  const unusableIds = Object.values(queue)
+    .filter(isUnusableGroupQueueItem)
+    .map((item) => item.id);
+
+  if (!unusableIds.length) return 0;
+
+  for (const itemId of unusableIds) {
+    delete queue[itemId];
+  }
+
+  await saveTelegramRuntimeMap("telegram_group_stock_queue", queue);
+  return unusableIds.length;
 }
 
 async function saveGroupQueueEdit(key: string, edit: TelegramGroupQueueEdit | null) {
@@ -573,6 +601,10 @@ async function appendGroupBlockFragment(key: string, fragment: TelegramGroupStoc
 
 function shouldQueueParsedGroupBlock(parsedBlock: ReturnType<typeof parseGroupBlock>) {
   if (!parsedBlock.accountTitle && !parsedBlock.imageFileIds.length && !parsedBlock.note && typeof parsedBlock.sellingPrice !== "number") {
+    return false;
+  }
+
+  if (!parsedBlock.accountTitle && !parsedBlock.imageFileIds.length) {
     return false;
   }
 
@@ -1303,6 +1335,7 @@ async function pendingGroupQueueItems() {
   const queue = getGroupQueue(await getSettings());
   return Object.values(queue)
     .filter((item) => !isEmptyShellGroupQueueItem(item))
+    .filter((item) => !isUnusableGroupQueueItem(item))
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
@@ -1635,6 +1668,7 @@ async function createStockAccountFromGroupQueueItem(item: TelegramGroupStockQueu
 }
 
 async function approveCompleteGroupQueueItems(chatId: number | string, userId: string, limit = 5) {
+  const removedUnusable = await pruneUnusableGroupQueueItems();
   const queueItems = await pendingGroupQueueItems();
   const completeItems = queueItems.filter((item) => missingGroupQueueFields(item).length === 0);
   const selectedItems = completeItems.slice(0, limit);
@@ -1670,6 +1704,7 @@ async function approveCompleteGroupQueueItems(chatId: number | string, userId: s
     incompleteWaiting: queueItems.length - completeItems.length,
     nextIncompleteMissing: nextIncomplete ? missingGroupQueueFields(nextIncomplete) : [],
     remainingComplete,
+    removedUnusable,
     skippedExisting
   };
 }
@@ -2148,6 +2183,7 @@ async function handleStockCallback(callback: TelegramCallbackQuery, chatId: numb
       const lines = [
         `Bulk add finished.`,
         `Added: ${result.added}`,
+        result.removedUnusable ? `Removed unusable fragments: ${result.removedUnusable}` : null,
         result.remainingComplete ? `Complete accounts still waiting: ${result.remainingComplete}` : null,
         result.failures.length ? `Errors:\n${result.failures.slice(0, 3).join("\n")}` : null
       ]
@@ -2536,6 +2572,7 @@ export async function POST(request: Request) {
 
   if (isReviewMissingCommand(text)) {
     await flushOpenGroupBlocks(false);
+    await pruneUnusableGroupQueueItems();
     await sendNextGroupQueueItem(chatId);
     return jsonOk({ handled: true });
   }
@@ -2548,6 +2585,7 @@ export async function POST(request: Request) {
       [
         "Bulk add finished.",
         `Added: ${result.added}`,
+        result.removedUnusable ? `Removed unusable fragments: ${result.removedUnusable}` : null,
         result.skippedExisting.length ? `Skipped existing: ${result.skippedExisting.join(", ")}` : null,
         result.remainingComplete ? `Complete accounts still waiting: ${result.remainingComplete}` : null,
         result.incompleteWaiting ? `Incomplete accounts waiting: ${result.incompleteWaiting}` : null,

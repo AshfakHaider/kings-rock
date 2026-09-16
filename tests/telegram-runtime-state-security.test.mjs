@@ -112,6 +112,18 @@ test("telegram bulk add skips already existing accounts and removes them from re
   assert.match(source, /Next incomplete needs: \$\{result\.nextIncompleteMissing\.join\(", "\)\}/);
 });
 
+test("telegram group review prunes unusable note-only fragments", async () => {
+  const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
+
+  assert.match(source, /function isUnusableGroupQueueItem\(item: TelegramGroupStockQueueItem\)/);
+  assert.match(source, /return !item\.accountTitle && !item\.imageFileIds\.length/);
+  assert.match(source, /async function pruneUnusableGroupQueueItems/);
+  assert.match(source, /\.filter\(\(item\) => !isUnusableGroupQueueItem\(item\)\)/);
+  assert.match(source, /if \(!parsedBlock\.accountTitle && !parsedBlock\.imageFileIds\.length\)\s*\{\s*return false;\s*\}/);
+  assert.match(source, /await pruneUnusableGroupQueueItems\(\);\s+await sendNextGroupQueueItem\(chatId\);/);
+  assert.match(source, /Removed unusable fragments: \$\{result\.removedUnusable\}/);
+});
+
 test("telegram stock imports default buying price to zero and do not require approval", async () => {
   const source = await readFile("app/api/telegram/webhook/route.ts", "utf8");
 
