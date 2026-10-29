@@ -113,6 +113,22 @@ describe("stock account workflow", () => {
 });
 
 describe("sales, payments, and funds", () => {
+  test("manager can sell available stock directly without an assignment", () => {
+    const crm = createBusinessWorkflowHarness();
+    const [account] = crm.store.stockAccounts;
+
+    const sale = crm.sellStock(managerProfile, {
+      stock_account_id: account.id,
+      employee_id: employeeProfile.id,
+      sold_amount: 30
+    });
+
+    expect(sale.stock_account_id).toBe(account.id);
+    expect(sale.employee_id).toBe(employeeProfile.id);
+    expect(sale.payment_status).toBe("pending");
+    expect(account.status).toBe("sold");
+  });
+
   test("sold stock cannot be sold twice", () => {
     const crm = createBusinessWorkflowHarness();
     const [account] = crm.store.stockAccounts;

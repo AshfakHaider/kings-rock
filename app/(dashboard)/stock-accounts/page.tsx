@@ -5,6 +5,7 @@ import { DeleteButton } from "@/components/modules/delete-button";
 import { PageHeader } from "@/components/modules/page-header";
 import { ResponsiveTable } from "@/components/modules/responsive-table";
 import { StatusBadge } from "@/components/modules/status-badge";
+import { MarkSoldModal } from "@/components/sales/mark-sold-modal";
 import { AssignmentSelect } from "@/components/stock/assignment-select";
 import { CopyStockTitleButton } from "@/components/stock/copy-stock-title-button";
 import { StockAccountModal } from "@/components/stock/stock-account-modal";
@@ -236,6 +237,13 @@ export default async function StockAccountsPage({ searchParams }: { searchParams
                       canViewPrivateData={canViewPrivateData}
                       canAssignAnyEmployee={currentProfile.role !== "employee"}
                     />
+                    {row.status === "available" || row.status === "assigned" ? (
+                      <MarkSoldModal
+                        account={withoutImages(row)}
+                        employees={employees}
+                        sourceWebsites={settings.sale_source_websites}
+                      />
+                    ) : null}
                     {canManageZeusx ? <StockZeusxModal stock={withoutImages(row)} /> : null}
                     <form action={deleteStockAccount}>
                       <input type="hidden" name="id" value={row.id} />
